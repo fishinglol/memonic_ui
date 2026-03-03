@@ -2,6 +2,8 @@ import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 
+
+
 export default function Settings() {
     const SettingItem = ({ icon, title }) => (
         <TouchableOpacity style={styles.item}>

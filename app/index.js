@@ -1,4 +1,4 @@
-import { Text, View, StyleSheet, TextInput, Alert, TouchableOpacity } from 'react-native';
+import { Text, View, StyleSheet, TextInput, Alert, TouchableOpacity, Image } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 
@@ -17,6 +17,10 @@ export default function Index() {
   return (
 
     <View style={styles.container}>
+      <Image
+        source={require('../assets/logo.png')}
+        style={{ width: 100, height: 100 }}
+      />
 
       <View style={styles.header}>
         <Text style={styles.title}>Memonic</Text>
