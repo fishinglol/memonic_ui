@@ -1,0 +1,79 @@
+import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { Ionicons } from '@expo/vector-icons';
+
+export default function Settings() {
+    const SettingItem = ({ icon, title }) => (
+        <TouchableOpacity style={styles.item}>
+            <Ionicons name={icon} size={22} color="#ffd33d" style={{ marginRight: 15 }} />
+            <Text style={styles.itemText}>{title}</Text>
+            <Ionicons name="chevron-forward" size={20} color="#8e8e93" style={{ marginLeft: 'auto' }} />
+        </TouchableOpacity>
+    );
+
+    return (
+        <View style={styles.container}>
+            <View style={styles.header}>
+                <Text style={styles.headerTitle}>Settings</Text>
+            </View>
+
+            <View style={styles.section}>
+                <SettingItem icon="person-outline" title="Account" />
+                <SettingItem icon="notifications-outline" title="Notifications" />
+                <SettingItem icon="lock-closed-outline" title="Privacy" />
+                <SettingItem icon="help-circle-outline" title="Help & Support" />
+            </View>
+
+            <TouchableOpacity style={styles.logoutButton}>
+                <Text style={styles.logoutText}>Log Out</Text>
+            </TouchableOpacity>
+        </View>
+    );
+}
+
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        backgroundColor: '#25292e',
+        paddingHorizontal: 20,
+    },
+    header: {
+        marginTop: 60,
+        marginBottom: 30,
+    },
+    headerTitle: {
+        color: '#fff',
+        fontSize: 34,
+        fontFamily: 'Garamond-Bold',
+        fontWeight: 'bold',
+    },
+    section: {
+        backgroundColor: '#1e2124',
+        borderRadius: 20,
+        overflow: 'hidden',
+    },
+    item: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#2c2f33',
+    },
+    itemText: {
+        color: '#fff',
+        fontSize: 17,
+        fontFamily: 'Garamond-Regular',
+    },
+    logoutButton: {
+        marginTop: 40,
+        backgroundColor: 'rgba(255, 69, 58, 0.1)',
+        padding: 16,
+        borderRadius: 15,
+        alignItems: 'center',
+    },
+    logoutText: {
+        color: '#ff453a',
+        fontSize: 17,
+        fontWeight: '600',
+    },
+});

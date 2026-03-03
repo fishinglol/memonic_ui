@@ -28,20 +28,20 @@ export default function TabLayout() {
                 }}
             />
             <Tabs.Screen
-                name="about"
-                options={{
-                    title: 'About',
-                    tabBarIcon: ({ color, focused }) => (
-                        <Ionicons name={focused ? 'information-circle' : 'information-circle-outline'} size={24} color={color} />
-                    ),
-                }}
-            />
-            <Tabs.Screen
                 name="chat"
                 options={{
                     title: 'Chat',
                     tabBarIcon: ({ color, focused }) => (
                         <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={24} color={color} />
+                    ),
+                }}
+            />
+            <Tabs.Screen
+                name="settings"
+                options={{
+                    title: 'Settings',
+                    tabBarIcon: ({ color, focused }) => (
+                        <Ionicons name={focused ? 'settings' : 'settings-outline'} size={24} color={color} />
                     ),
                 }}
             />
