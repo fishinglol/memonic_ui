@@ -17,6 +17,25 @@ export default function Settings() {
                 <Text style={styles.headerTitle}>Settings</Text>
             </View>
 
+            <View style={styles.statusCard}>
+                {/* ส่วนแสดง Battery */}
+                <View style={styles.statusItem}>
+                    <Ionicons name="battery-charging" size={24} color="#4cd964" />
+                    <Text style={styles.statusLabel}>Bracelet</Text>
+                    <Text style={styles.statusValue}>85%</Text>
+                </View>
+
+                {/* เส้นคั่นกลางจางๆ */}
+                <View style={styles.divider} />
+
+                {/* ส่วนแสดง CPU/Dock Connection */}
+                <View style={styles.statusItem}>
+                    <Ionicons name="hardware-chip-outline" size={24} color="#ffd33d" />
+                    <Text style={styles.statusLabel}>Dock (CPU)</Text>
+                    <Text style={styles.statusValue}>Connected</Text>
+                </View>
+            </View>
+
             <View style={styles.section}>
                 <SettingItem icon="person-outline" title="Account" />
                 <SettingItem icon="notifications-outline" title="Notifications" />
@@ -76,4 +95,44 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '600',
     },
+    statusCard: {
+        backgroundColor: '#1e2124', // สีเดียวกับ Section อื่นๆ ของคุณ
+        borderRadius: 25,
+        padding: 20,
+        flexDirection: 'row',        // จัดวาง Battery และ CPU ขนานกัน
+        alignItems: 'center',
+        justifyContent: 'space-around',
+        marginBottom: 30,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+
+        // เพิ่มเงาให้มีมิติ
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+        elevation: 8,
+    },
+    statusItem: {
+        alignItems: 'center',        // จัด Icon และ Text ให้อยู่ตรงกลางของแต่ละฝั่ง
+        flex: 1,
+    },
+    divider: {
+        width: 1,
+        height: '60%',
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    statusLabel: {
+        color: '#8e8e93',
+        fontSize: 12,
+        marginTop: 5,
+        fontFamily: 'Garamond-Regular',
+    },
+    statusValue: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+        fontFamily: 'Garamond-Bold',
+    },
+
 });
