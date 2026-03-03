@@ -1,11 +1,34 @@
-import { Slot } from 'expo-router';
-import React from 'react';
-import { View } from 'react-native';
+import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import * as SplashScreen from 'expo-splash-screen';
+import { useFonts, EBGaramond_400Regular, EBGaramond_700Bold } from '@expo-google-fonts/eb-garamond';
+
+// ป้องกัน Splash Screen หายก่อน Font โหลดเสร็จ
+SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
+    const [loaded, error] = useFonts({
+        'Garamond-Regular': EBGaramond_400Regular,
+        'Garamond-Bold': EBGaramond_700Bold,
+    });
+
+    useEffect(() => {
+        if (loaded || error) {
+            SplashScreen.hideAsync();
+        }
+    }, [loaded, error]);
+
+    if (!loaded && !error) {
+        return null;
+    }
+
     return (
-        <View style={{ flex: 1, backgroundColor: '#25292e' }}>
-            <Slot />
-        </View>
+        <Stack screenOptions={{ headerShown: false }}>
+            {/* 1. หน้า Login อยู่ข้างนอก (ไม่มี Tab) */}
+            <Stack.Screen name="index" />
+
+            {/* 2. เมื่อ Login แล้วจะวิ่งเข้าโฟลเดอร์นี้ (ที่มี Tab) */}
+            <Stack.Screen name="(tabs)" />
+        </Stack>
     );
 }

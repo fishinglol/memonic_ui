@@ -12,7 +12,7 @@ export default function Index() {
       Alert.alert('Error', 'Please enter your username first.');
       return;
     }
-    router.push('/About');
+    router.push('/home');
   };
   return (
 
