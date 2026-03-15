@@ -1,12 +1,15 @@
 import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
 
 
 export default function Settings() {
-    const SettingItem = ({ icon, title }) => (
-        <TouchableOpacity style={styles.item}>
+    const router = useRouter();
+
+    const SettingItem = ({ icon, title, onPress }) => (
+        <TouchableOpacity style={styles.item} onPress={onPress}>
             <Ionicons name={icon} size={22} color="#ffd33d" style={{ marginRight: 15 }} />
             <Text style={styles.itemText}>{title}</Text>
             <Ionicons name="chevron-forward" size={20} color="#8e8e93" style={{ marginLeft: 'auto' }} />
@@ -40,8 +43,8 @@ export default function Settings() {
 
             <View style={styles.section}>
                 <SettingItem icon="person-outline" title="Account" />
+                <SettingItem icon="people-circle-outline" title="Member" onPress={() => router.push('/member')} />
                 <SettingItem icon="notifications-outline" title="Notifications" />
-                <SettingItem icon="lock-closed-outline" title="Privacy" />
                 <SettingItem icon="help-circle-outline" title="Help & Support" />
             </View>
 

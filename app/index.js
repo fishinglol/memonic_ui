@@ -1,22 +1,79 @@
 import { Text, View, StyleSheet, TextInput, Alert, TouchableOpacity, Image } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
+import { useVideoPlayer, VideoView } from 'expo-video';
 
 export default function Index() {
-
-  const [text, setText] = useState('');
+  // 1. แยก State ให้ชัดเจน และเพิ่ม State สำหรับ Password
+  const [userName, setUserName] = useState('');
+  const [password, setPassword] = useState('');
   const router = useRouter();
 
-  const handleLogin = () => {
-    if (text.trim().length === 0) {
-      Alert.alert('Error', 'Please enter your username first.');
+  // 2. ไม่ต้องใส่ Parameter ในวงเล็บ เพราะเราดึงค่าจากตัวแปร State ด้านบนได้เลย
+  const handleLogin = async () => {
+
+    if (userName.trim().length === 0 || password.trim().length === 0) {
+      Alert.alert('Error', 'Please enter your username and password.');
       return;
     }
-    router.push('/home');
-  };
-  return (
 
+    try {
+      const response = await fetch('https://8001-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_name: userName, // แก้ Typo จาก user_naem ให้ถูกต้องตามฝั่ง FastAPI
+          password: password,
+        }),
+      });
+
+      // 1. Get the raw text first
+      const textResponse = await response.text();
+      let data;
+
+      // 2. Safely try to parse it as JSON
+      try {
+        data = JSON.parse(textResponse);
+      } catch (e) {
+        // If it fails to parse, the server probably sent an HTML error page
+        console.error("Server returned non-JSON:", textResponse);
+        Alert.alert("Server Error", "Received an invalid response from the server.");
+        return;
+      }
+
+      // 3. Now check if the status code was 200 OK
+      if (response.ok) {
+        // เมื่อ Login สำเร็จ ควรไปหน้า Chat ที่เราสร้างไว้ (สมมติว่าชื่อไฟล์คือ /chat)
+        router.push('/chat');
+      } else {
+        // ถ้าใส่รหัสผิด ให้โชว์ detail ที่ FastAPI ส่งกลับมา
+        Alert.alert('Login Failed', data?.detail || 'Invalid credentials');
+      }
+    } catch (error) {
+      console.error('Error logging in:', error);
+      Alert.alert('Error', 'Failed to connect to Memonic Server.');
+    }
+    // 4. ลบ router.push() บรรทัดสุดท้ายที่เคยวางผิดที่ออกไปแล้ว
+  };
+
+  const player = useVideoPlayer(require('../assets/logo_bg.mp4'), player => {
+    player.loop = true;
+    player.muted = true;
+    player.play();
+  });
+
+  return (
     <View style={styles.container}>
+      {/* Video Background */}
+      <VideoView
+        player={player}
+        style={StyleSheet.absoluteFillObject}
+        nativeControls={false}
+        contentFit="cover"
+      />
       <Image
         source={require('../assets/logo.png')}
         style={{ width: 100, height: 100 }}
@@ -25,23 +82,57 @@ export default function Index() {
       <View style={styles.header}>
         <Text style={styles.title}>Memonic</Text>
       </View>
-
-      <View style={styles.card}>
-
-        <Text style={styles.text}>Login</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="User Name"
-          value={text}
-          onChangeText={setText}
-        />
-        <TouchableOpacity onPress={handleLogin} style={styles.button}>
-          <Text style={styles.buttonText}>Login</Text>
-        </TouchableOpacity>
-
+      <View style={styles.sub_header}>
+        <Text style={styles.sub_title}>Welcome To Make Your Life Memorable</Text>
       </View>
 
+      <View style={styles.cardContainer}>
+        {/* The Background Layer */}
+        <View style={styles.card_bg} pointerEvents="none" />
 
+        {/* The Main Login Card */}
+        <View style={styles.card}>
+          <Text style={styles.text}>Login</Text>
+
+          {/* ช่องกรอก Username */}
+          <TextInput
+            style={styles.input}
+            placeholder="User Name"
+            value={userName}
+            onChangeText={setUserName}
+            autoCapitalize="none" // ป้องกันมือถือพิมพ์ตัวใหญ่ให้อัตโนมัติ (เดี๋ยว login ไม่ผ่าน)
+          />
+
+          {/* ช่องกรอก Password ที่เพิ่มเข้ามาใหม่ */}
+          <TextInput
+            style={styles.input}
+            placeholder="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={true} // ซ่อนรหัสผ่านเป็นจุดดำๆ
+          />
+
+          <TouchableOpacity onPress={handleLogin} style={styles.button}>
+            <Text style={styles.buttonText}>Login</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.button}>
+            <Ionicons name="key-outline" size={20} color="#25292e" style={{ marginRight: 10 }} />
+            <Text style={styles.buttonText}>Login with your passkey</Text>
+          </TouchableOpacity>
+
+          {/* Sign Up Link */}
+          <TouchableOpacity
+            onPress={() => router.push('/signin')}
+            style={styles.signUpLink}
+          >
+            <Text style={styles.signUpText}>
+              Don't have an account?{' '}
+              <Text style={styles.signUpHighlight}>Sign Up</Text>
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 }
@@ -56,10 +147,19 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   title: {
-    fontFamily: 'Garamond-Bold', // Ensure this font is correctly loaded in your project
-    fontSize: 64,               // Increased size to make it "big"
+    fontFamily: 'Garamond-Bold',
+    fontSize: 64,
     fontWeight: 'bold',
-    color: '#fff',              // Added white color so it's visible on your dark background
+    color: '#fff',
+  },
+  sub_title: {
+    fontFamily: 'Garamond-Regular',
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#070707ff',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)', // สีของเงา (ดำโปร่งแสง)
+    textShadowOffset: { width: 1, height: 1 }, // ทิศทางของเงา (กว้าง, สูง)
+    textShadowRadius: 3, // ความฟุ้งของเงา
   },
   container: {
     flex: 1,
@@ -67,23 +167,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 20,
-
+  },
+  cardContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+    marginTop: 50,
   },
   card: {
-    backgroundColor: '#1e2124', // Semi-transparent white
+    backgroundColor: '#1e2124',
+    padding: 40,
+    borderRadius: 40,
+    width: '85%',
+    zIndex: 2,
+    elevation: 10,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.5,
     shadowRadius: 15,
-
-    // Android Shadow
-    elevation: 10,
-    padding: 40,
-    borderRadius: 40,
-    width: '85%',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(0, 0, 0, 0.2)', // Subtle border
+    marginTop: -65,
   },
   text: {
     color: '#fff',
@@ -101,6 +204,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
+    flexDirection: 'row',
   },
   buttonText: {
     color: '#25292e',
@@ -118,5 +222,28 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#fff',
   },
+  card_bg: {
+    position: 'absolute',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 50,
+    width: '95%',
+    height: '250%',
+    zIndex: 1,
+    top: -15,
+    marginTop: -110,
+  },
+  signUpLink: {
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  signUpText: {
+    color: '#888',
+    fontSize: 14,
+    fontFamily: 'Garamond-Regular',
+  },
+  signUpHighlight: {
+    color: '#fff',
+    fontFamily: 'Garamond-Bold',
+    fontWeight: '700',
+  },
 });
-
