@@ -8,12 +8,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // --- AI Backend URL ---
 const AI_BASE_URL = 'https://8000-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai';
 
-// --- Placeholder Data ---
-const UPCOMING_EVENTS = [
-    { id: '1', time: '2:30 PM', title: 'Design Sync', location: 'Conference Room B', icon: 'videocam-outline' },
-    { id: '2', time: '4:00 PM', title: 'Client Meeting', location: 'Virtual Call', icon: 'call-outline' },
-    { id: '3', time: '6:00 PM', title: 'Gym Session', location: 'Fitness Hub', icon: 'barbell-outline' },
-];
+
 
 function getGreeting() {
     const hour = new Date().getHours();
@@ -33,6 +28,9 @@ export default function Home() {
     const [highlights, setHighlights] = useState('Loading...');
     const [aiTasks, setAiTasks] = useState([]);
     const [updatedAt, setUpdatedAt] = useState(null);
+    const [upcomingEvents, setUpcomingEvents] = useState([]);
+    const [eventsLoading, setEventsLoading] = useState(true);
+    const [moodData, setMoodData] = useState(null);
 
     const fetchHomeData = async () => {
         try {
@@ -58,6 +56,32 @@ export default function Home() {
     useEffect(() => {
         // Initial load
         fetchHomeData();
+
+        // Fetch upcoming events
+        const fetchEvents = async () => {
+            try {
+                const res = await fetch(`${AI_BASE_URL}/api/get-events/fish`);
+                const data = await res.json();
+                setUpcomingEvents(data.events || []);
+            } catch (err) {
+                console.error('Failed to fetch events:', err);
+            } finally {
+                setEventsLoading(false);
+            }
+        };
+        fetchEvents();
+
+        // Fetch mood data
+        const fetchMood = async () => {
+            try {
+                const res = await fetch(`${AI_BASE_URL}/api/get-mood/fish`);
+                const data = await res.json();
+                setMoodData(data);
+            } catch (err) {
+                console.error('Failed to fetch mood:', err);
+            }
+        };
+        fetchMood();
 
         // Popup polling every 10 seconds
         const popupInterval = setInterval(async () => {
@@ -165,16 +189,28 @@ export default function Home() {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.upcomingScroll}
                 >
-                    {UPCOMING_EVENTS.map((event) => (
-                        <View key={event.id} style={styles.eventCard}>
-                            <View style={styles.eventIconWrap}>
-                                <Ionicons name={event.icon} size={20} color="#ffd33d" />
-                            </View>
-                            <Text style={styles.eventTime}>{event.time}</Text>
-                            <Text style={styles.eventTitle}>{event.title}</Text>
-                            <Text style={styles.eventLocation}>{event.location}</Text>
+                    {eventsLoading ? (
+                        [1, 2, 3].map(i => (
+                            <View key={i} style={[styles.eventCard, styles.skeletonCard]} />
+                        ))
+                    ) : upcomingEvents.length === 0 ? (
+                        <View style={styles.eventCard}>
+                            <Ionicons name="mic-outline" size={20} color="#ffd33d" />
+                            <Text style={styles.eventTitle}>Talk to Memonic</Text>
+                            <Text style={styles.eventLocation}>to see your events</Text>
                         </View>
-                    ))}
+                    ) : (
+                        upcomingEvents.map((event) => (
+                            <View key={event.id} style={styles.eventCard}>
+                                <View style={styles.eventIconWrap}>
+                                    <Ionicons name={event.icon} size={20} color="#ffd33d" />
+                                </View>
+                                <Text style={styles.eventTime}>{event.time}</Text>
+                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                <Text style={styles.eventLocation}>{event.location}</Text>
+                            </View>
+                        ))
+                    )}
                 </ScrollView>
 
                 {/* ─── Mood & Energy ─── */}
@@ -184,11 +220,17 @@ export default function Home() {
                 <View style={styles.moodCard}>
                     <View style={styles.moodLeft}>
                         <View style={styles.moodEmojiWrap}>
-                            <Text style={styles.moodEmoji}>😌</Text>
+                            <Text style={styles.moodEmoji}>
+                                {moodData?.emoji ?? '😌'}
+                            </Text>
                         </View>
                         <View style={styles.moodInfo}>
-                            <Text style={styles.moodLabel}>Calm & Focused</Text>
-                            <Text style={styles.moodSub}>Based on today's voice analysis</Text>
+                            <Text style={styles.moodLabel}>
+                                {moodData?.label ?? 'Loading...'}
+                            </Text>
+                            <Text style={styles.moodSub}>
+                                {moodData?.sub ?? 'Analyzing your voice...'}
+                            </Text>
                         </View>
                     </View>
                     <View style={styles.moodBarContainer}>
@@ -199,7 +241,10 @@ export default function Home() {
                                 end={{ x: 1, y: 0 }}
                                 style={styles.moodBarFill}
                             />
-                            <View style={[styles.moodIndicator, { left: '25%' }]} />
+                            <View style={[
+                                styles.moodIndicator,
+                                { left: `${(moodData?.indicator_position ?? 0.5) * 100}%` }
+                            ]} />
                         </View>
                         <View style={styles.moodBarLabels}>
                             <Text style={styles.moodBarLabelText}>Calm</Text>
@@ -514,5 +559,12 @@ const styles = StyleSheet.create({
     taskTextDone: {
         color: '#8e8e93',
         textDecorationLine: 'line-through',
+    },
+    skeletonCard: {
+        width: 130,
+        height: 120,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        borderRadius: 16,
+        marginRight: 12,
     },
 });

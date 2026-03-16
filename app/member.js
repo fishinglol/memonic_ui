@@ -33,48 +33,10 @@ export default function Member() {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                {/* Membership Card */}
-                <LinearGradient
-                    colors={['#ffd33d', '#f7b733']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.membershipCard}
-                >
-                    <View style={styles.cardInfo}>
-                        <Text style={styles.membershipLabel}>Current Status</Text>
-                        <Text style={styles.membershipLevel}>Premium Member</Text>
-                    </View>
-                    <Ionicons name="star" size={40} color="rgba(255, 255, 255, 0.5)" />
-                </LinearGradient>
 
-                {/* Information Section */}
-                <View style={styles.sectionBenefit}>
-                    <Text style={styles.sectionTitle}>Benefits</Text>
 
-                    <View style={styles.benefitItem}>
-                        <Ionicons name="infinite-outline" size={24} color="#ffd33d" />
-                        <View style={styles.benefitTextContent}>
-                            <Text style={styles.benefitTitle}>Unlimited Sync</Text>
-                            <Text style={styles.benefitDescription}>Sync all your memories across all devices instantly.</Text>
-                        </View>
-                    </View>
 
-                    <View style={styles.benefitItem}>
-                        <Ionicons name="cloud-done-outline" size={24} color="#ffd33d" />
-                        <View style={styles.benefitTextContent}>
-                            <Text style={styles.benefitTitle}>Advanced AI Insights</Text>
-                            <Text style={styles.benefitDescription}>Get deeper analysis on your daily interactions.</Text>
-                        </View>
-                    </View>
 
-                    <View style={styles.benefitItem}>
-                        <Ionicons name="shield-checkmark-outline" size={24} color="#ffd33d" />
-                        <View style={styles.benefitTextContent}>
-                            <Text style={styles.benefitTitle}>Priority Support</Text>
-                            <Text style={styles.benefitDescription}>24/7 access to our dedicated support team.</Text>
-                        </View>
-                    </View>
-                </View>
 
                 <View style={styles.section}>
                     <SettingItem icon="person-outline" title="Account" />
