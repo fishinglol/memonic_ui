@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { API_URL } from '../app/config';
+import { AI_URL } from '../app/config';
 let Audio = null;
 try {
     Audio = require('expo-av').Audio;
@@ -213,7 +213,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                 type: 'audio/mp4',
             });
 
-            const response = await fetch(`${API_URL}/api/enroll`, {
+            const response = await fetch(`${AI_URL}/api/enroll`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
