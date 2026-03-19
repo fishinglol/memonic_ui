@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { API_URL } from '../app/config';
 let Audio = null;
 try {
     Audio = require('expo-av').Audio;
@@ -17,9 +18,6 @@ try {
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
-
-// 🔧 Change this to your backend IP when testing on device
-const API_BASE = 'https://8000-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai';
 
 const MIN_SECONDS = 5;
 const MAX_SECONDS = 10;
@@ -212,11 +210,14 @@ export default function AddMemberSheet({ visible, onClose }) {
             formData.append('file', {
                 uri: recordingUriRef.current,
                 name: 'voiceprint.m4a',
-                type: 'audio/m4a',
+                type: 'audio/mp4',
             });
 
-            const response = await fetch(`${API_BASE}/api/enroll`, {
+            const response = await fetch(`${API_URL}/api/enroll`, {
                 method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                },
                 body: formData,
             });
 
