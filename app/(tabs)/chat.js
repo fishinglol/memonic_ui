@@ -9,52 +9,130 @@ import {
     ScrollView,
     Dimensions,
     RefreshControl,
-    Modal
+    Modal,
+    ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { API_URL } from '../config';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export default function Chat() {
     const [message, setMessage] = useState("");
     const [messages, setMessages] = useState([]);
+    const [sessionId, setSessionId] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
     const [isFetchingHistory, setIsFetchingHistory] = useState(false);
     const [historyVisible, setHistoryVisible] = useState(false);
+    const [historySessions, setHistorySessions] = useState([]);
+    const scrollViewRef = useRef(null);
 
-    // ข้อมูลจำลองสำหรับ History Drawer
-    const historyItems = [
-        { id: '1', title: 'Styling React Native Chat Input', icon: 'chatbubble-outline' },
-        { id: '2', title: 'Startup Dev Log: Memonic Day 6', icon: 'document-text-outline' },
-        { id: '3', title: 'ESP32 Hardware AES Encryption', icon: 'hardware-chip-outline' },
-        { id: '4', title: 'LLM Access to YouTube Watch...', icon: 'logo-youtube' },
-    ];
+    // Fetch chat sessions on mount
+    useEffect(() => {
+        fetchSessions();
+    }, []);
 
-    // ฟังก์ชันสร้างแชทใหม่ (เคลียร์หน้าจอแบบ ChatGPT)
+    // Auto-scroll to bottom when messages change
+    useEffect(() => {
+        if (scrollViewRef.current && messages.length > 0) {
+            setTimeout(() => {
+                scrollViewRef.current.scrollToEnd({ animated: true });
+            }, 100);
+        }
+    }, [messages]);
+
+    // Fetch all chat sessions for the History Drawer
+    const fetchSessions = async () => {
+        try {
+            const res = await fetch(`${API_URL}/api/chat/sessions`);
+            if (res.ok) {
+                const data = await res.json();
+                setHistorySessions(data);
+            }
+        } catch (err) {
+            console.log("Failed to fetch sessions:", err);
+        }
+    };
+
+    // Load messages for a specific session
+    const loadSession = async (sid) => {
+        try {
+            const res = await fetch(`${API_URL}/api/chat/sessions/${sid}`);
+            if (res.ok) {
+                const data = await res.json();
+                const formatted = data.map((m, i) => ({
+                    id: `${sid}_${i}`,
+                    text: m.content,
+                    role: m.role,
+                }));
+                setMessages(formatted);
+                setSessionId(sid);
+                setHistoryVisible(false);
+            }
+        } catch (err) {
+            console.log("Failed to load session:", err);
+        }
+    };
+
+    // Start a new chat (clear screen like ChatGPT)
     const handleNewChat = () => {
         setMessages([]);
+        setSessionId(null);
         setHistoryVisible(false);
     };
 
-    // ฟังก์ชันดึงประวัติแชทด้านบน (Pull to refresh)
+    // Pull to refresh — reload chat sessions
     const loadHistory = () => {
         setIsFetchingHistory(true);
-        setTimeout(() => {
-            const oldMessages = [
-                { id: `old_1_${Date.now()}`, text: "Previous conversation from yesterday..." },
-                { id: `old_2_${Date.now()}`, text: "Older AI response..." }
-            ];
-            setMessages(prev => [...oldMessages, ...prev]);
-            setIsFetchingHistory(false);
-        }, 1500);
+        fetchSessions().finally(() => setIsFetchingHistory(false));
     };
 
-    // ฟังก์ชันส่งข้อความ
-    const handleSend = () => {
-        if (message.trim().length > 0) {
-            setMessages(prev => [...prev, { id: Date.now().toString(), text: message }]);
-            setMessage('');
+    // Send message to backend and get AI reply
+    const handleSend = async () => {
+        if (message.trim().length === 0 || isLoading) return;
+
+        const userText = message.trim();
+        setMessage('');
+
+        // Optimistically add user message
+        const userMsg = { id: `user_${Date.now()}`, text: userText, role: 'user' };
+        setMessages(prev => [...prev, userMsg]);
+        setIsLoading(true);
+
+        try {
+            const res = await fetch(`${API_URL}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: sessionId,
+                    message: userText,
+                }),
+            });
+
+            const data = await res.json();
+
+            // Set session ID if this was the first message
+            if (!sessionId && data.session_id) {
+                setSessionId(data.session_id);
+            }
+
+            // Add AI response
+            const aiMsg = { id: `ai_${Date.now()}`, text: data.reply, role: 'ai' };
+            setMessages(prev => [...prev, aiMsg]);
+
+            // Refresh sessions list in background
+            fetchSessions();
+        } catch (err) {
+            const errorMsg = {
+                id: `err_${Date.now()}`,
+                text: '⚠️ Failed to connect to server. Please check your connection.',
+                role: 'ai',
+            };
+            setMessages(prev => [...prev, errorMsg]);
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -79,7 +157,7 @@ export default function Chat() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-            {/* --- ส่วน Header --- */}
+            {/* --- Header --- */}
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Memonic</Text>
                 <TouchableOpacity style={styles.iconButtonHeader} onPress={handleNewChat}>
@@ -87,8 +165,9 @@ export default function Chat() {
                 </TouchableOpacity>
             </View>
 
-            {/* --- พื้นที่แสดงข้อความ --- */}
+            {/* --- Messages Area --- */}
             <ScrollView
+                ref={scrollViewRef}
                 style={styles.messagesContainer}
                 contentContainerStyle={styles.messagesContent}
                 onScroll={handleScroll}
@@ -104,7 +183,7 @@ export default function Chat() {
                     />
                 }
             >
-                {/* คำทักทาย (จะหายไปเมื่อเริ่มแชท) */}
+                {/* Welcome message (hidden when chatting) */}
                 {messages.length === 0 && (
                     <View style={styles.welcomeContainer}>
                         <Ionicons name="sparkles" size={40} color="#ffd33d" style={styles.welcomeLogo} />
@@ -115,12 +194,34 @@ export default function Chat() {
                     </View>
                 )}
 
-                {/* บับเบิลข้อความ */}
+                {/* Message bubbles */}
                 {messages.map((msg) => (
-                    <View key={msg.id} style={styles.userMessageBubble}>
-                        <Text style={styles.messageText}>{msg.text}</Text>
+                    <View
+                        key={msg.id}
+                        style={msg.role === 'user' ? styles.userMessageBubble : styles.aiMessageBubble}
+                    >
+                        {msg.role === 'ai' && (
+                            <View style={styles.aiAvatarRow}>
+                                <Ionicons name="sparkles" size={14} color="#ffd33d" />
+                                <Text style={styles.aiLabel}>Memonic</Text>
+                            </View>
+                        )}
+                        <Text style={msg.role === 'user' ? styles.userMessageText : styles.aiMessageText}>
+                            {msg.text}
+                        </Text>
                     </View>
                 ))}
+
+                {/* Loading indicator while AI is thinking */}
+                {isLoading && (
+                    <View style={styles.loadingContainer}>
+                        <View style={styles.aiAvatarRow}>
+                            <Ionicons name="sparkles" size={14} color="#ffd33d" />
+                            <Text style={styles.aiLabel}>Memonic</Text>
+                        </View>
+                        <ActivityIndicator size="small" color="#ffd33d" style={{ marginTop: 8 }} />
+                    </View>
+                )}
             </ScrollView>
 
             {/* --- HISTORY MODAL (DRAWER) --- */}
@@ -131,7 +232,6 @@ export default function Chat() {
                 onRequestClose={() => setHistoryVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    {/* พื้นที่ว่างด้านบน แตะเพื่อปิด */}
                     <TouchableOpacity
                         style={styles.closeArea}
                         onPress={() => setHistoryVisible(false)}
@@ -149,10 +249,24 @@ export default function Chat() {
                         </View>
 
                         <ScrollView showsVerticalScrollIndicator={false}>
-                            {historyItems.map((item) => (
-                                <TouchableOpacity key={item.id} style={styles.historyItem} onPress={() => setHistoryVisible(false)}>
+                            {historySessions.length === 0 && (
+                                <View style={styles.emptyHistory}>
+                                    <Ionicons name="chatbubbles-outline" size={40} color="#444" />
+                                    <Text style={styles.emptyHistoryText}>No conversations yet</Text>
+                                    <Text style={styles.emptyHistorySubText}>Start a new chat to see it here</Text>
+                                </View>
+                            )}
+                            {historySessions.map((item) => (
+                                <TouchableOpacity
+                                    key={item.session_id}
+                                    style={[
+                                        styles.historyItem,
+                                        sessionId === item.session_id && styles.historyItemActive,
+                                    ]}
+                                    onPress={() => loadSession(item.session_id)}
+                                >
                                     <View style={styles.historyIconCircle}>
-                                        <Ionicons name={item.icon} size={18} color="#8e8e93" />
+                                        <Ionicons name="chatbubble-outline" size={18} color="#8e8e93" />
                                     </View>
                                     <Text style={styles.historyItemText} numberOfLines={1}>
                                         {item.title}
@@ -165,7 +279,7 @@ export default function Chat() {
                 </View>
             </Modal>
 
-            {/* --- พื้นที่พิมพ์ข้อความ (Input Area) --- */}
+            {/* --- Input Area --- */}
             <View style={styles.inputArea}>
                 <TouchableOpacity style={styles.iconButtonInput} onPress={() => { console.log("Attach Image!"); }}>
                     <Ionicons name="image" size={24} color="#aaa" />
@@ -185,11 +299,16 @@ export default function Chat() {
                         value={message}
                         onChangeText={setMessage}
                         multiline
+                        editable={!isLoading}
                     />
                 </View>
 
-                <TouchableOpacity style={styles.sendButton} onPress={handleSend}>
-                    <Ionicons name="send" size={18} color="#25292e" />
+                <TouchableOpacity
+                    style={[styles.sendButton, isLoading && styles.sendButtonDisabled]}
+                    onPress={handleSend}
+                    disabled={isLoading}
+                >
+                    <Ionicons name="send" size={18} color={isLoading ? "#999" : "#25292e"} />
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
@@ -248,19 +367,60 @@ const styles = StyleSheet.create({
         fontSize: 24,
         fontFamily: 'Garamond-Regular',
     },
+    // User message (right-aligned, gold)
     userMessageBubble: {
         alignSelf: 'flex-end',
         backgroundColor: '#ffd33d',
         padding: 12,
         borderRadius: 20,
+        borderBottomRightRadius: 4,
         marginBottom: 10,
         marginTop: 10,
         maxWidth: '80%',
     },
-    messageText: {
+    userMessageText: {
         color: '#25292e',
         fontSize: 16,
         fontFamily: 'Garamond-Regular',
+    },
+    // AI message (left-aligned, dark)
+    aiMessageBubble: {
+        alignSelf: 'flex-start',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        padding: 14,
+        borderRadius: 20,
+        borderBottomLeftRadius: 4,
+        marginBottom: 10,
+        marginTop: 10,
+        maxWidth: '88%',
+    },
+    aiAvatarRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 6,
+        gap: 5,
+    },
+    aiLabel: {
+        color: '#ffd33d',
+        fontSize: 12,
+        fontFamily: 'Garamond-Bold',
+        fontWeight: '600',
+    },
+    aiMessageText: {
+        color: '#e0e0e0',
+        fontSize: 16,
+        fontFamily: 'Garamond-Regular',
+        lineHeight: 24,
+    },
+    loadingContainer: {
+        alignSelf: 'flex-start',
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        padding: 14,
+        borderRadius: 20,
+        borderBottomLeftRadius: 4,
+        marginBottom: 10,
+        marginTop: 10,
+        minWidth: 80,
     },
     inputArea: {
         flexDirection: 'row',
@@ -308,6 +468,9 @@ const styles = StyleSheet.create({
         shadowRadius: 5,
         elevation: 5,
     },
+    sendButtonDisabled: {
+        backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    },
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -351,6 +514,22 @@ const styles = StyleSheet.create({
         fontFamily: 'Garamond-Bold',
         fontWeight: 'bold',
     },
+    emptyHistory: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 60,
+        gap: 8,
+    },
+    emptyHistoryText: {
+        color: '#888',
+        fontSize: 16,
+        fontFamily: 'Garamond-Bold',
+    },
+    emptyHistorySubText: {
+        color: '#555',
+        fontSize: 14,
+        fontFamily: 'Garamond-Regular',
+    },
     historyItem: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -359,6 +538,11 @@ const styles = StyleSheet.create({
         borderRadius: 15,
         marginBottom: 5,
         backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    },
+    historyItemActive: {
+        backgroundColor: 'rgba(255, 211, 61, 0.1)',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 211, 61, 0.2)',
     },
     historyIconCircle: {
         width: 36,

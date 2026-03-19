@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import { API_URL } from './config';
 
 export default function Index() {
   // 1. แยก State ให้ชัดเจน และเพิ่ม State สำหรับ Password
@@ -19,13 +20,13 @@ export default function Index() {
     }
 
     try {
-      const response = await fetch('https://8001-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai/login', {
+      const response = await fetch(`${API_URL}/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          user_name: userName, // แก้ Typo จาก user_naem ให้ถูกต้องตามฝั่ง FastAPI
+          user_name: userName,
           password: password,
         }),
       });
