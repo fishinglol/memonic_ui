@@ -206,14 +206,14 @@ export default function AddMemberSheet({ visible, onClose }) {
         setEnrolling(true);
         try {
             const formData = new FormData();
-            formData.append('user_id', memberName.trim());
             formData.append('file', {
                 uri: recordingUriRef.current,
                 name: 'voiceprint.m4a',
                 type: 'audio/mp4',
             });
 
-            const response = await fetch(`${AI_URL}/api/enroll`, {
+            const encodedUserId = encodeURIComponent(memberName.trim());
+            const response = await fetch(`${AI_URL}/api/enroll/${encodedUserId}`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
