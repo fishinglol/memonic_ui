@@ -2,6 +2,7 @@ import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 
 
@@ -67,7 +68,13 @@ export default function Settings() {
             </View>
 
             {/* Log Out Button */}
-            <TouchableOpacity style={styles.logoutButton}>
+            <TouchableOpacity 
+                style={styles.logoutButton}
+                onPress={async () => {
+                    await AsyncStorage.clear();
+                    router.replace('/');
+                }}
+            >
                 <Text style={styles.logoutText}>Log Out</Text>
             </TouchableOpacity>
         </View>

@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from './config';
 
 export default function Index() {
@@ -47,6 +48,12 @@ export default function Index() {
 
       // 3. Now check if the status code was 200 OK
       if (response.ok) {
+        // Save user name so other screens (like Account) know who logged in
+        await AsyncStorage.setItem('user_name', userName);
+        if (data?.user_id) {
+          await AsyncStorage.setItem('user_id', String(data.user_id));
+        }
+
         // เมื่อ Login สำเร็จ ควรไปหน้า Chat ที่เราสร้างไว้ (สมมติว่าชื่อไฟล์คือ /chat)
         router.push('/chat');
       } else {

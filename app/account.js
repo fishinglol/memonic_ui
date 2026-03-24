@@ -1,4 +1,3 @@
-import React from 'react';
 import {
   View,
   Text,
@@ -6,13 +5,125 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useState, useEffect } from 'react';
+import AddMemberSheet from '../components/sub_member';
+import { API_URL, AI_URL } from './config';
 
 export default function AccountScreen() {
   const router = useRouter();
+  const [userName, setUserName] = useState('Loading...');
+  const [voiceSheetVisible, setVoiceSheetVisible] = useState(false);
+  
+  // Notification State
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  // Change Password Modal State
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
+
+  // Loading State for Actions
+  const [actionLoading, setActionLoading] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('user_name').then(name => setUserName(name || 'Unknown User'));
+  }, []);
+
+  const handleNotificationToggle = () => {
+    Alert.alert(
+      "Notification Preference",
+      "Do you want to receive alerts and updates?",
+      [
+        { text: "Non-Notification", onPress: () => setNotificationsEnabled(false) },
+        { text: "Notify Me", onPress: () => setNotificationsEnabled(true) }
+      ]
+    );
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword) {
+      Alert.alert("Error", "Please fill out all fields.");
+      return;
+    }
+    setPasswordLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/change-password`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_name: userName,
+          current_password: currentPassword,
+          new_password: newPassword
+        })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        Alert.alert("Success", "Password changed successfully.");
+        setPasswordModalVisible(false);
+        setCurrentPassword('');
+        setNewPassword('');
+      } else {
+        Alert.alert("Error", data.detail || "Failed to update password.");
+      }
+    } catch (e) {
+      Alert.alert("Error", "Failed to connect to the server.");
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      "Delete Account",
+      "This action is permanent and irreversible. Are you absolutely sure?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { 
+          text: "Delete", 
+          style: "destructive", 
+          onPress: async () => {
+            setActionLoading(true);
+            try {
+              // 1. Delete Voice Profile (AI Server)
+              const aiUserId = await AsyncStorage.getItem('user_id');
+              const aiFallbackId = userName; // Fallback to username 
+              // Attempting to delete based on how enroll works. Enroll uses user_id from req
+              await fetch(`${AI_URL}/api/voice-profile/${aiUserId || aiFallbackId}`, { method: 'DELETE' });
+
+              // 2. Delete User Data (Core Server)
+              const response = await fetch(`${API_URL}/api/account/${userName}`, {
+                method: 'DELETE'
+              });
+
+              if (response.ok) {
+                // Clear session and logout
+                await AsyncStorage.clear();
+                router.replace('/');
+              } else {
+                const data = await response.json();
+                Alert.alert("Error", data.detail || "Could not delete account.");
+              }
+            } catch (error) {
+              console.error(error);
+              Alert.alert("Error", "Server connection failed during deletion.");
+            } finally {
+              setActionLoading(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   const SettingItem = ({ icon, title, subtitle, onPress }) => (
     <TouchableOpacity style={styles.item} onPress={onPress}>
@@ -51,7 +162,7 @@ export default function AccountScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.userName}>Julian Thorne</Text>
+          <Text style={styles.userName}>{userName}</Text>
           <View style={styles.badgeContainer}>
             <Text style={styles.badgeText}>
               <Text style={styles.premiumText}>PREMIUM CURATOR</Text>
@@ -67,35 +178,105 @@ export default function AccountScreen() {
             icon="mic-outline"
             title="Voice Owner"
             subtitle="Manage your vocal identity"
+            onPress={() => setVoiceSheetVisible(true)}
           />
           <SettingItem
-            icon="notifications-outline"
+            icon={notificationsEnabled ? "notifications-outline" : "notifications-off-outline"}
             title="Notification"
-            subtitle="Control alerts and updates"
+            subtitle={notificationsEnabled ? "On (Notify Me)" : "Off (Non-Notification)"}
+            onPress={handleNotificationToggle}
           />
           <SettingItem
             icon="lock-closed-outline"
             title="Change Password"
             subtitle="Secure your private access"
+            onPress={() => setPasswordModalVisible(true)}
           />
         </View>
 
         {/* Danger Zone */}
-        <View style={styles.dangerZone}>
+        <TouchableOpacity style={styles.dangerZone} onPress={handleDeleteAccount} disabled={actionLoading}>
           <View style={styles.dangerHeader}>
             <View style={styles.trashCircle}>
-              <Ionicons name="trash-outline" size={20} color="#ff453a" />
+              {actionLoading ? (
+                <ActivityIndicator color="#ff453a" size="small" />
+              ) : (
+                <Ionicons name="trash-outline" size={20} color="#ff453a" />
+              )}
             </View>
             <View style={styles.dangerTextContainer}>
-              <Text style={styles.dangerTitle}>Delete Account</Text>
+              <Text style={styles.dangerTitle}>
+                {actionLoading ? "Deleting..." : "Delete Account"}
+              </Text>
               <Text style={styles.dangerLabel}>PERMANENT ACTION</Text>
             </View>
           </View>
           <Text style={styles.dangerDescription}>
             All your entries, voice models, and collections will be erased forever.
           </Text>
-        </View>
+        </TouchableOpacity>
       </ScrollView>
+
+      {/* Voice Owner / Add Member Sheet */}
+      <AddMemberSheet
+        visible={voiceSheetVisible}
+        onClose={() => setVoiceSheetVisible(false)}
+      />
+
+      {/* Change Password Modal */}
+      <Modal
+        visible={passwordModalVisible}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Change Password</Text>
+            <Text style={styles.modalSubtitle}>Please enter your current and new password.</Text>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Current Password"
+              placeholderTextColor="#8e8e93"
+              secureTextEntry
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="New Password"
+              placeholderTextColor="#8e8e93"
+              secureTextEntry
+              value={newPassword}
+              onChangeText={setNewPassword}
+            />
+
+            <View style={styles.modalButtonRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonCancel]}
+                onPress={() => {
+                  setPasswordModalVisible(false);
+                  setCurrentPassword('');
+                  setNewPassword('');
+                }}
+              >
+                <Text style={styles.modalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSave]}
+                onPress={handleChangePassword}
+                disabled={passwordLoading}
+              >
+                {passwordLoading ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.modalButtonSaveText}>Save</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -264,5 +445,79 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#8e8e93',
     lineHeight: 18,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '85%',
+    backgroundColor: '#1c1c1e',
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 22,
+    color: '#fff',
+    fontFamily: 'Garamond-Bold',
+    marginBottom: 5,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#8e8e93',
+    fontFamily: 'Garamond-Regular',
+    marginBottom: 20,
+  },
+  input: {
+    backgroundColor: '#2c2c2e',
+    borderRadius: 12,
+    color: '#fff',
+    paddingHorizontal: 15,
+    height: 50,
+    marginBottom: 15,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  modalButtonRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+  },
+  modalButton: {
+    flex: 1,
+    height: 50,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalButtonCancel: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginRight: 10,
+  },
+  modalButtonSave: {
+    backgroundColor: '#ffd33d',
+    marginLeft: 10,
+  },
+  modalButtonCancelText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  modalButtonSaveText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
