@@ -8,46 +8,65 @@ import { useRouter } from 'expo-router';
 export default function Settings() {
     const router = useRouter();
 
+    const DeviceStatus = ({ icon, label, value, color }) => (
+        <View style={styles.statusItem}>
+            <Ionicons name={icon} size={28} color={color} />
+            <Text style={styles.statusLabel}>{label}</Text>
+            <Text style={styles.statusValue}>{value}</Text>
+        </View>
+    );
+
     const SettingItem = ({ icon, title, onPress }) => (
         <TouchableOpacity style={styles.item} onPress={onPress}>
-            <Ionicons name={icon} size={22} color="#ffd33d" style={{ marginRight: 15 }} />
+            <View style={styles.itemIconCircle}>
+                <Ionicons name={icon} size={20} color="#ffd33d" />
+            </View>
             <Text style={styles.itemText}>{title}</Text>
-            <Ionicons name="chevron-forward" size={20} color="#8e8e93" style={{ marginLeft: 'auto' }} />
+            <Ionicons name="chevron-forward" size={18} color="#48484a" />
         </TouchableOpacity>
     );
 
     return (
         <View style={styles.container}>
+            {/* Page Title */}
             <View style={styles.header}>
                 <Text style={styles.headerTitle}>Settings</Text>
             </View>
 
+            {/* Device Status Card */}
             <View style={styles.statusCard}>
-                {/* ส่วนแสดง Battery */}
-                <View style={styles.statusItem}>
-                    <Ionicons name="battery-charging" size={24} color="#4cd964" />
-                    <Text style={styles.statusLabel}>Bracelet</Text>
-                    <Text style={styles.statusValue}>85%</Text>
-                </View>
-
-                {/* เส้นคั่นกลางจางๆ */}
-                <View style={styles.divider} />
-
-                {/* ส่วนแสดง CPU/Dock Connection */}
-                <View style={styles.statusItem}>
-                    <Ionicons name="hardware-chip-outline" size={24} color="#ffd33d" />
-                    <Text style={styles.statusLabel}>Dock (CPU)</Text>
-                    <Text style={styles.statusValue}>Connected</Text>
-                </View>
+                <DeviceStatus
+                    icon="battery-charging"
+                    label="Bracelet"
+                    value="85%"
+                    color="#4cd964"
+                />
+                <View style={styles.verticalDivider} />
+                <DeviceStatus
+                    icon="hardware-chip-outline"
+                    label="Dock (CPU)"
+                    value="Connected"
+                    color="#ffd33d"
+                />
             </View>
 
-            <View style={styles.section}>
-                <SettingItem icon="person-outline" title="Account" />
-                <SettingItem icon="people-circle-outline" title="Member" onPress={() => router.push('/member')} />
+            {/* Main Settings Group */}
+            <View style={styles.settingsGroup}>
+                <SettingItem
+                    icon="person-outline"
+                    title="Account"
+                    onPress={() => router.push('/account')}
+                />
+                <SettingItem
+                    icon="people-circle-outline"
+                    title="Member"
+                    onPress={() => router.push('/member')}
+                />
                 <SettingItem icon="notifications-outline" title="Notifications" />
                 <SettingItem icon="help-circle-outline" title="Help & Support" />
             </View>
 
+            {/* Log Out Button */}
             <TouchableOpacity style={styles.logoutButton}>
                 <Text style={styles.logoutText}>Log Out</Text>
             </TouchableOpacity>
@@ -58,86 +77,93 @@ export default function Settings() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#25292e',
+        backgroundColor: '#111417',
         paddingHorizontal: 20,
     },
     header: {
-        marginTop: 60,
-        marginBottom: 30,
+        marginTop: 130, // Adjusted for the top tab bar
+        marginBottom: 25,
     },
     headerTitle: {
         color: '#fff',
-        fontSize: 34,
+        fontSize: 42,
         fontFamily: 'Garamond-Bold',
         fontWeight: 'bold',
     },
-    section: {
-        backgroundColor: '#1e2124',
-        borderRadius: 20,
-        overflow: 'hidden',
-    },
-    item: {
+    statusCard: {
+        backgroundColor: '#1c1c1e',
+        borderRadius: 25,
+        paddingVertical: 20,
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#2c2f33',
-    },
-    itemText: {
-        color: '#fff',
-        fontSize: 17,
-        fontFamily: 'Garamond-Regular',
-    },
-    logoutButton: {
-        marginTop: 40,
-        backgroundColor: 'rgba(255, 69, 58, 0.1)',
-        padding: 16,
-        borderRadius: 15,
-        alignItems: 'center',
-    },
-    logoutText: {
-        color: '#ff453a',
-        fontSize: 17,
-        fontWeight: '600',
-    },
-    statusCard: {
-        backgroundColor: '#1e2124', // สีเดียวกับ Section อื่นๆ ของคุณ
-        borderRadius: 25,
-        padding: 20,
-        flexDirection: 'row',        // จัดวาง Battery และ CPU ขนานกัน
-        alignItems: 'center',
-        justifyContent: 'space-around',
-        marginBottom: 30,
         borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.1)',
-
-        // เพิ่มเงาให้มีมิติ
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3,
-        shadowRadius: 15,
-        elevation: 8,
+        borderColor: 'rgba(255, 255, 255, 0.05)',
+        marginBottom: 30,
+        height: 120,
     },
     statusItem: {
-        alignItems: 'center',        // จัด Icon และ Text ให้อยู่ตรงกลางของแต่ละฝั่ง
         flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    divider: {
+    verticalDivider: {
         width: 1,
-        height: '60%',
+        height: '50%',
         backgroundColor: 'rgba(255, 255, 255, 0.1)',
     },
     statusLabel: {
         color: '#8e8e93',
-        fontSize: 12,
-        marginTop: 5,
+        fontSize: 13,
+        marginTop: 8,
         fontFamily: 'Garamond-Regular',
     },
     statusValue: {
         color: '#fff',
-        fontSize: 16,
+        fontSize: 20,
         fontWeight: 'bold',
         fontFamily: 'Garamond-Bold',
+        marginTop: 2,
     },
-
+    settingsGroup: {
+        backgroundColor: '#1c1c1e',
+        borderRadius: 20,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.05)',
+        marginBottom: 40,
+    },
+    item: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 18,
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    itemIconCircle: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 15,
+    },
+    itemText: {
+        color: '#fff',
+        fontSize: 19,
+        fontFamily: 'Garamond-Regular',
+        flex: 1,
+    },
+    logoutButton: {
+        backgroundColor: '#2e1c1c',
+        height: 55,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    logoutText: {
+        color: '#ff453a',
+        fontSize: 19,
+        fontWeight: '700',
+    },
 });
