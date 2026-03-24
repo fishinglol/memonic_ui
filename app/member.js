@@ -1,13 +1,36 @@
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import React, { useState } from 'react';
+import { Text, View, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AddMemberSheet from '../components/sub_member';
+import { AI_URL } from './config';
 
 export default function Member() {
     const router = useRouter();
     const [sheetVisible, setSheetVisible] = useState(false);
+    const [members, setMembers] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
+
+    const fetchMembers = useCallback(async () => {
+        try {
+            const response = await fetch(`${AI_URL}/api/members`);
+            const data = await response.json();
+            setMembers(data);
+        } catch (error) {
+            console.error("Error fetching members:", error);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchMembers();
+    }, [fetchMembers]);
+
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await fetchMembers();
+        setRefreshing(false);
+    }, [fetchMembers]);
 
     const SettingItem = ({ icon, title, onPress, isAdd }) => (
         <TouchableOpacity style={styles.item} onPress={onPress}>
@@ -32,11 +55,50 @@ export default function Member() {
                 <Text style={styles.headerTitle}>Member</Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.scrollContent}>
+            <ScrollView 
+                contentContainerStyle={styles.scrollContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#ffd33d"
+                    />
+                }
+            >
 
 
 
 
+
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Registered Members</Text>
+                    <TouchableOpacity onPress={onRefresh}>
+                        <Ionicons name="refresh" size={18} color="#ffd33d" />
+                    </TouchableOpacity>
+                </View>
+
+                <View style={styles.section}>
+                    {members.length > 0 ? (
+                        members.map((member, index) => (
+                            <SettingItem 
+                                key={index} 
+                                icon="person-circle-outline" 
+                                title={member} 
+                            />
+                        ))
+                    ) : (
+                        <View style={{ padding: 40, alignItems: 'center' }}>
+                            <Ionicons name="people-outline" size={48} color="rgba(255, 255, 255, 0.1)" />
+                            <Text style={{ color: '#8e8e93', marginTop: 10, fontStyle: 'italic' }}>
+                                No members registered yet
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Settings</Text>
+                </View>
 
                 <View style={styles.section}>
                     <SettingItem icon="person-outline" title="Account" />
@@ -132,17 +194,26 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: 'rgba(255, 255, 255, 0.05)',
     },
+    sectionTitle: {
+        color: '#fff',
+        fontSize: 22,
+        fontFamily: 'Garamond-Bold',
+        fontWeight: 'bold',
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 12,
+        marginTop: 10,
+    },
     section: {
         backgroundColor: '#1e2124',
         borderRadius: 20,
         overflow: 'hidden',
-        marginBottom: 20,
-    },
-    sectionTitle: {
-        color: '#fff',
-        fontSize: 20,
-        fontFamily: 'Garamond-Bold',
-        marginBottom: 20,
+        marginBottom: 25,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.05)',
     },
     benefitItem: {
         flexDirection: 'row',

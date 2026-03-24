@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { AI_URL } from '../app/config';
 let Audio = null;
 try {
@@ -207,9 +207,25 @@ export default function AddMemberSheet({ visible, onClose }) {
         setEnrolling(true);
         try {
             // 1. Read the audio file as a Base64 string
-            const audioBase64 = await FileSystem.readAsStringAsync(recordingUriRef.current, {
-                encoding: FileSystem.EncodingType.Base64,
-            });
+            // Handle cross-platform: Web cannot use FileSystem.readAsStringAsync
+            let audioBase64;
+            if (Platform.OS === 'web') {
+                const res = await fetch(recordingUriRef.current);
+                const blob = await res.blob();
+                audioBase64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        // result is data:audio/xxx;base64,.... -> split by comma
+                        resolve(reader.result.split(',')[1]);
+                    };
+                    reader.onerror = reject;
+                    reader.readAsDataURL(blob);
+                });
+            } else {
+                audioBase64 = await FileSystem.readAsStringAsync(recordingUriRef.current, {
+                    encoding: 'base64',
+                });
+            }
 
             // 2. Prepare JSON payload
             const payload = {
