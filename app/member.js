@@ -55,7 +55,7 @@ export default function Member() {
                 <Text style={styles.headerTitle}>Member</Text>
             </View>
 
-            <ScrollView 
+            <ScrollView
                 contentContainerStyle={styles.scrollContent}
                 refreshControl={
                     <RefreshControl
@@ -80,10 +80,10 @@ export default function Member() {
                 <View style={styles.section}>
                     {members.length > 0 ? (
                         members.map((member, index) => (
-                            <SettingItem 
-                                key={index} 
-                                icon="person-circle-outline" 
-                                title={member} 
+                            <SettingItem
+                                key={index}
+                                icon="person-circle-outline"
+                                title={member}
                             />
                         ))
                     ) : (
@@ -96,12 +96,12 @@ export default function Member() {
                     )}
                 </View>
 
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Settings</Text>
-                </View>
-
                 <View style={styles.section}>
-                    <SettingItem icon="person-outline" title="Account" />
+                    <SettingItem 
+                        icon="person-outline" 
+                        title="Account" 
+                        onPress={() => router.push('/account')}
+                    />
                     <SettingItem
                         icon="person-add-outline"
                         title="Add Member"

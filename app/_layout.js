@@ -34,7 +34,10 @@ export default function RootLayout() {
             {/* 3. Member page (full page) */}
             <Stack.Screen name="member" />
 
-            {/* 4. Sign Up / Register page */}
+            {/* 4. Account page */}
+            <Stack.Screen name="account" />
+
+            {/* 5. Sign Up / Register page */}
             <Stack.Screen name="signin" />
         </Stack>
     );
