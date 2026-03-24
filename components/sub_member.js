@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import * as FileSystem from 'expo-file-system';
 import { AI_URL } from '../app/config';
 let Audio = null;
 try {
@@ -205,20 +206,25 @@ export default function AddMemberSheet({ visible, onClose }) {
 
         setEnrolling(true);
         try {
-            const formData = new FormData();
-            formData.append('file', {
-                uri: recordingUriRef.current,
-                name: 'voiceprint.m4a',
-                type: 'audio/mp4',
+            // 1. Read the audio file as a Base64 string
+            const audioBase64 = await FileSystem.readAsStringAsync(recordingUriRef.current, {
+                encoding: FileSystem.EncodingType.Base64,
             });
 
-            const encodedUserId = encodeURIComponent(memberName.trim());
-            const response = await fetch(`${AI_URL}/api/enroll/${encodedUserId}`, {
+            // 2. Prepare JSON payload
+            const payload = {
+                user_id: memberName.trim(),
+                file_ext: '.m4a',
+                audio_base64: audioBase64
+            };
+
+            const response = await fetch(`${AI_URL}/api/enroll`, {
                 method: 'POST',
                 headers: {
                     'Accept': 'application/json',
+                    'Content-Type': 'application/json'
                 },
-                body: formData,
+                body: JSON.stringify(payload),
             });
 
             const data = await response.json();
