@@ -22,10 +22,10 @@ export default function Settings() {
                 const res = await fetch(`${AI_URL}/device-status`);
                 const data = await res.json();
                 setBracelet(data.bracelet);
-                setDock(data.dock);
+                setDock('Connected');    // If fetch succeeds, the dock (backend server) is reachable.
             } catch {
-                setBracelet('Offline');
-                setDock('Offline');
+                setBracelet('Disconnected');
+                setDock('Disconnected'); // If fetch fails, the dock (backend server) is offline.
             }
         };
         fetchStatus();                          // fetch immediately

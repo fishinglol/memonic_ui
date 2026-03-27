@@ -2,10 +2,11 @@ import { Text, View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert
 import React, { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SHADOWS } from '../theme';
+import { AI_URL } from '../config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const AI_BASE_URL = 'https://8000-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai';
+const AI_BASE_URL = AI_URL;
 
 const MOCK_MOOD_HISTORY = [
     { time: '9a', val: 0.2 },

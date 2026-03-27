@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { COLORS, SHADOWS } from './theme';
+import { API_URL } from './config';
 
 export default function SignIn() {
   const [userName, setUserName] = useState('');
@@ -23,7 +24,7 @@ export default function SignIn() {
 
     setLoading(true);
     try {
-      const response = await fetch('https://8001-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai/signin', {
+      const response = await fetch(`${API_URL}/signin`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_name: userName, password: password }),
