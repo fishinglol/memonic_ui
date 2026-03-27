@@ -1,7 +1,8 @@
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView, FlatList } from 'react-native';
+import { Text, View, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
 import React from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import { COLORS, SHADOWS } from './theme';
 
 // Placeholder data — replace with real data later
 const VOICE_HISTORY = [
@@ -17,7 +18,7 @@ export default function VoiceHistory() {
         <View style={styles.historyCard}>
             <View style={styles.cardLeft}>
                 <View style={styles.avatarCircle}>
-                    <Ionicons name="person" size={22} color="#ffd33d" />
+                    <Ionicons name="person" size={20} color={COLORS.icon} />
                 </View>
                 <View style={styles.cardInfo}>
                     <Text style={styles.cardName}>{item.name}</Text>
@@ -40,10 +41,11 @@ export default function VoiceHistory() {
         <View style={styles.container}>
             {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <Ionicons name="chevron-back" size={28} color="#fff" />
+                <TouchableOpacity onPress={() => router.back()} style={styles.pillButton}>
+                    <Ionicons name="chevron-back" size={24} color={COLORS.icon} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Voice History</Text>
+                <View style={{ width: 44 }} />
             </View>
 
             {VOICE_HISTORY.length > 0 ? (
@@ -56,7 +58,9 @@ export default function VoiceHistory() {
                 />
             ) : (
                 <View style={styles.emptyState}>
-                    <Ionicons name="mic-off-outline" size={64} color="rgba(255, 255, 255, 0.15)" />
+                    <View style={styles.emptyIconWrap}>
+                        <Ionicons name="mic-off-outline" size={48} color={COLORS.textMuted} />
+                    </View>
                     <Text style={styles.emptyTitle}>No Voice History</Text>
                     <Text style={styles.emptySubtitle}>Voice enrollments will appear here.</Text>
                 </View>
@@ -66,114 +70,50 @@ export default function VoiceHistory() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#25292e',
-    },
+    container: { flex: 1, backgroundColor: COLORS.bg },
     header: {
-        marginTop: 60,
-        paddingHorizontal: 20,
-        marginBottom: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
+        marginTop: 60, paddingHorizontal: 24, marginBottom: 20,
+        flexDirection: 'row', alignItems: 'center',
     },
-    backButton: {
-        marginRight: 15,
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
+    pillButton: {
+        width: 44, height: 44, borderRadius: 22,
+        backgroundColor: COLORS.surface, justifyContent: 'center', alignItems: 'center',
+        ...SHADOWS.button,
     },
     headerTitle: {
-        color: '#fff',
-        fontSize: 34,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
+        flex: 1, color: COLORS.text, fontSize: 28,
+        fontFamily: 'Garamond-Bold', fontWeight: 'bold', textAlign: 'center',
     },
-    listContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 40,
-    },
+    listContent: { paddingHorizontal: 24, paddingBottom: 40 },
+
     historyCard: {
-        backgroundColor: '#1e2124',
-        borderRadius: 18,
-        padding: 16,
-        marginBottom: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
+        backgroundColor: COLORS.surface, borderRadius: 22, padding: 18,
+        marginBottom: 12, flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between', ...SHADOWS.card,
     },
-    cardLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        flex: 1,
-    },
+    cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
     avatarCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: 'rgba(255, 211, 61, 0.12)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 14,
+        width: 44, height: 44, borderRadius: 16,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+        marginRight: 14, ...SHADOWS.small,
     },
-    cardInfo: {
-        flex: 1,
+    cardInfo: { flex: 1 },
+    cardName: { color: COLORS.text, fontSize: 17, fontFamily: 'Garamond-Bold', fontWeight: '600' },
+    cardDate: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginTop: 2 },
+
+    statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
+    statusEnrolled: { backgroundColor: 'rgba(52, 199, 89, 0.12)' },
+    statusPending: { backgroundColor: COLORS.accentSoft },
+    statusText: { fontSize: 13, fontFamily: 'Garamond-Regular', fontWeight: '600' },
+    statusTextEnrolled: { color: '#34c759' },
+    statusTextPending: { color: COLORS.accent },
+
+    emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 },
+    emptyIconWrap: {
+        width: 80, height: 80, borderRadius: 28,
+        backgroundColor: COLORS.surface, justifyContent: 'center', alignItems: 'center',
+        marginBottom: 16, ...SHADOWS.card,
     },
-    cardName: {
-        color: '#fff',
-        fontSize: 17,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-    },
-    cardDate: {
-        color: '#8e8e93',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginTop: 2,
-    },
-    statusBadge: {
-        paddingHorizontal: 12,
-        paddingVertical: 5,
-        borderRadius: 10,
-    },
-    statusEnrolled: {
-        backgroundColor: 'rgba(52, 199, 89, 0.15)',
-    },
-    statusPending: {
-        backgroundColor: 'rgba(255, 211, 61, 0.15)',
-    },
-    statusText: {
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        fontWeight: '600',
-    },
-    statusTextEnrolled: {
-        color: '#34c759',
-    },
-    statusTextPending: {
-        color: '#ffd33d',
-    },
-    emptyState: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        paddingBottom: 80,
-    },
-    emptyTitle: {
-        color: '#fff',
-        fontSize: 20,
-        fontFamily: 'Garamond-Bold',
-        marginTop: 16,
-    },
-    emptySubtitle: {
-        color: '#8e8e93',
-        fontSize: 15,
-        fontFamily: 'Garamond-Regular',
-        marginTop: 6,
-    },
+    emptyTitle: { color: COLORS.text, fontSize: 20, fontFamily: 'Garamond-Bold', marginTop: 16 },
+    emptySubtitle: { color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular', marginTop: 6 },
 });

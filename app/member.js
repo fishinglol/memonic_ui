@@ -2,9 +2,9 @@ import { Text, View, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import AddMemberSheet from '../components/sub_member';
 import { AI_URL } from './config';
+import { COLORS, SHADOWS } from './theme';
 
 export default function Member() {
     const router = useRouter();
@@ -14,7 +14,7 @@ export default function Member() {
 
     const fetchMembers = useCallback(async () => {
         try {
-            const response = await fetch(`${AI_URL}/api/members`);
+            const response = await fetch(`${AI_URL}/api/members_voice`);
             const data = await response.json();
             setMembers(data);
         } catch (error) {
@@ -32,77 +32,82 @@ export default function Member() {
         setRefreshing(false);
     }, [fetchMembers]);
 
-    const SettingItem = ({ icon, title, onPress, isAdd }) => (
-        <TouchableOpacity style={styles.item} onPress={onPress}>
-            <Ionicons name={icon} size={22} color="#ffd33d" style={{ marginRight: 15 }} />
-            <Text style={styles.itemText}>{title}</Text>
-            <Ionicons
-                name={isAdd ? "add" : "chevron-forward"}
-                size={isAdd ? 26 : 20}
-                color="#8e8e93"
-                style={{ marginLeft: 'auto' }}
-            />
+    const MemberRow = ({ icon, title, onPress, isAdd }) => (
+        <TouchableOpacity
+            style={[styles.memberRow, isAdd && styles.memberRowAccent]}
+            onPress={onPress}
+            activeOpacity={0.7}
+        >
+            <View style={[styles.iconCircle, isAdd && styles.iconCircleAccent]}>
+                <Ionicons name={icon} size={20} color={isAdd ? '#fff' : COLORS.icon} />
+            </View>
+            <Text style={[styles.memberRowText, isAdd && styles.memberRowTextBold]}>
+                {title}
+            </Text>
+            <View style={styles.chevronCircle}>
+                <Ionicons
+                    name={isAdd ? "add" : "chevron-forward"}
+                    size={isAdd ? 20 : 16}
+                    color={COLORS.textMuted}
+                />
+            </View>
         </TouchableOpacity>
     );
 
     return (
         <View style={styles.container}>
-            {/* Header */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <Ionicons name="chevron-back" size={28} color="#fff" />
+                <TouchableOpacity onPress={() => router.back()} style={styles.pillButton}>
+                    <Ionicons name="chevron-back" size={24} color={COLORS.icon} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Member</Text>
+                <Text style={styles.headerTitle}>Members</Text>
+                <TouchableOpacity onPress={onRefresh} style={styles.pillButton}>
+                    <Ionicons name="refresh-outline" size={20} color={COLORS.icon} />
+                </TouchableOpacity>
             </View>
 
             <ScrollView
                 contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
                 refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        tintColor="#ffd33d"
-                    />
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.textMuted} />
                 }
             >
-
-
-
-
-
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Registered Members</Text>
-                    <TouchableOpacity onPress={onRefresh}>
-                        <Ionicons name="refresh" size={18} color="#ffd33d" />
-                    </TouchableOpacity>
+                <View style={styles.countCard}>
+                    <View style={styles.countIconWrap}>
+                        <Ionicons name="people-outline" size={28} color={COLORS.icon} />
+                    </View>
+                    <View style={styles.countInfo}>
+                        <Text style={styles.countNumber}>{members.length}</Text>
+                        <Text style={styles.countLabel}>Registered Voices</Text>
+                    </View>
                 </View>
 
-                <View style={styles.section}>
+                <Text style={styles.sectionLabel}>VOICE PROFILES</Text>
+
+                <View style={styles.card}>
                     {members.length > 0 ? (
                         members.map((member, index) => (
-                            <SettingItem
-                                key={index}
-                                icon="person-circle-outline"
-                                title={member}
-                            />
+                            <View key={index}>
+                                <MemberRow icon="person-circle-outline" title={member} />
+                                {index < members.length - 1 && <View style={styles.rowDivider} />}
+                            </View>
                         ))
                     ) : (
-                        <View style={{ padding: 40, alignItems: 'center' }}>
-                            <Ionicons name="people-outline" size={48} color="rgba(255, 255, 255, 0.1)" />
-                            <Text style={{ color: '#8e8e93', marginTop: 10, fontStyle: 'italic' }}>
-                                No members registered yet
-                            </Text>
+                        <View style={styles.emptyState}>
+                            <View style={styles.emptyIconWrap}>
+                                <Ionicons name="mic-off-outline" size={36} color={COLORS.textMuted} />
+                            </View>
+                            <Text style={styles.emptyTitle}>No voices yet</Text>
+                            <Text style={styles.emptySubtitle}>Enroll your first member below</Text>
                         </View>
                     )}
                 </View>
 
-                <View style={styles.section}>
-                    <SettingItem 
-                        icon="person-outline" 
-                        title="Account" 
-                        onPress={() => router.push('/account')}
-                    />
-                    <SettingItem
+                <Text style={styles.sectionLabel}>ACTIONS</Text>
+
+                <View style={styles.card}>
+                    <MemberRow
                         icon="person-add-outline"
                         title="Add Member"
                         isAdd={true}
@@ -110,13 +115,14 @@ export default function Member() {
                     />
                 </View>
 
-                {/* Subscription Info */}
-                <View style={styles.infoBox}>
-                    <Text style={styles.infoText}>Your next renewal is on April 6, 2026.</Text>
+                <View style={styles.footerInfo}>
+                    <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.textMuted} />
+                    <Text style={styles.footerText}>Your next renewal is on April 6, 2026</Text>
                 </View>
+
+                <View style={{ height: 40 }} />
             </ScrollView>
 
-            {/* Bottom Sheet from sub_member.js */}
             <AddMemberSheet
                 visible={sheetVisible}
                 onClose={() => setSheetVisible(false)}
@@ -126,138 +132,67 @@ export default function Member() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#25292e',
-    },
+    container: { flex: 1, backgroundColor: COLORS.bg },
     header: {
-        marginTop: 60,
-        paddingHorizontal: 20,
-        marginBottom: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
+        marginTop: 60, paddingHorizontal: 24, paddingBottom: 8,
+        flexDirection: 'row', alignItems: 'center',
     },
-    backButton: {
-        marginRight: 15,
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        justifyContent: 'center',
-        alignItems: 'center',
+    pillButton: {
+        width: 44, height: 44, borderRadius: 22,
+        backgroundColor: COLORS.surface, justifyContent: 'center', alignItems: 'center',
+        ...SHADOWS.button,
     },
     headerTitle: {
-        color: '#fff',
-        fontSize: 34,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
+        flex: 1, color: COLORS.text, fontSize: 28,
+        fontFamily: 'Garamond-Bold', fontWeight: 'bold', textAlign: 'center',
     },
-    scrollContent: {
-        paddingHorizontal: 20,
-        paddingBottom: 40,
+    scrollContent: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 20 },
+    countCard: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: COLORS.surface, borderRadius: 28, padding: 24, marginBottom: 32,
+        ...SHADOWS.card,
     },
-    membershipCard: {
-        borderRadius: 25,
-        padding: 25,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 30,
-        shadowColor: "#ffd33d",
-        shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.3,
-        shadowRadius: 15,
-        elevation: 10,
+    countIconWrap: {
+        width: 56, height: 56, borderRadius: 20,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+        marginRight: 20, ...SHADOWS.small,
     },
-    cardInfo: {
-        flex: 1,
+    countInfo: { flex: 1 },
+    countNumber: { color: COLORS.text, fontSize: 36, fontFamily: 'Garamond-Bold', fontWeight: 'bold', lineHeight: 40 },
+    countLabel: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular', marginTop: 2 },
+    sectionLabel: {
+        color: COLORS.textMuted, fontSize: 12, fontFamily: 'Garamond-Regular',
+        textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 14,
     },
-    membershipLabel: {
-        color: 'rgba(255, 255, 255, 0.8)',
-        fontSize: 14,
-        fontFamily: 'Garamond-Regular',
-        textTransform: 'uppercase',
-        letterSpacing: 1,
+    card: {
+        backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden', marginBottom: 28,
+        ...SHADOWS.card,
     },
-    membershipLevel: {
-        color: '#fff',
-        fontSize: 28,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
-        marginTop: 5,
+    memberRow: {
+        flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 20,
     },
-    sectionBenefit: {
-        backgroundColor: '#1e2124',
-        borderRadius: 25,
-        padding: 20,
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
+    memberRowAccent: {},
+    iconCircle: {
+        width: 40, height: 40, borderRadius: 14,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+        marginRight: 16, ...SHADOWS.small,
     },
-    sectionTitle: {
-        color: '#fff',
-        fontSize: 22,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
+    iconCircleAccent: { backgroundColor: COLORS.accent, shadowColor: COLORS.accent, shadowOpacity: 0.3 },
+    memberRowText: { flex: 1, color: COLORS.text, fontSize: 17, fontFamily: 'Garamond-Regular' },
+    memberRowTextBold: { fontFamily: 'Garamond-Bold', fontWeight: '600' },
+    chevronCircle: {
+        width: 32, height: 32, borderRadius: 12,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
     },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 12,
-        marginTop: 10,
+    rowDivider: { height: 1, backgroundColor: COLORS.divider, marginHorizontal: 20 },
+    emptyState: { paddingVertical: 48, alignItems: 'center' },
+    emptyIconWrap: {
+        width: 72, height: 72, borderRadius: 24,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+        marginBottom: 16, ...SHADOWS.small,
     },
-    section: {
-        backgroundColor: '#1e2124',
-        borderRadius: 20,
-        overflow: 'hidden',
-        marginBottom: 25,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    benefitItem: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: 20,
-    },
-    benefitTextContent: {
-        marginLeft: 15,
-        flex: 1,
-    },
-    benefitTitle: {
-        color: '#fff',
-        fontSize: 17,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-    },
-    benefitDescription: {
-        color: '#8e8e93',
-        fontSize: 14,
-        fontFamily: 'Garamond-Regular',
-        marginTop: 2,
-    },
-    infoBox: {
-        padding: 20,
-        alignItems: 'center',
-    },
-    infoText: {
-        color: '#8e8e93',
-        fontSize: 14,
-        fontFamily: 'Garamond-Regular',
-        textAlign: 'center',
-    },
-    item: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#2c2f33',
-    },
-    itemText: {
-        color: '#fff',
-        fontSize: 17,
-        fontFamily: 'Garamond-Regular',
-    },
+    emptyTitle: { color: COLORS.text, fontSize: 18, fontFamily: 'Garamond-Bold', fontWeight: '600', marginBottom: 6 },
+    emptySubtitle: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular' },
+    footerInfo: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingVertical: 16 },
+    footerText: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginLeft: 6 },
 });
-
-

@@ -4,116 +4,79 @@ import { Ionicons } from '@expo/vector-icons';
 import { Animated, View } from 'react-native';
 import React, { useRef } from 'react';
 
+const C = {
+    bg:          '#2c3240',
+    surface:     '#323848',
+    surfaceDeep: '#262c38',
+    shadowDark:  '#1e222c',
+    text:        '#ffffff',
+    textMuted:   '#8a92a6',
+};
+
 const TopTab = withLayoutContext(createMaterialTopTabNavigator().Navigator);
 
 export default function TabLayout() {
-    // 1. Animated value for Y-axis (0 = visible, -150 = hidden off-screen)
     const translateY = useRef(new Animated.Value(0)).current;
-    // Store the initial Y coordinate of the touch
     const touchY = useRef(0);
 
     const showTabBar = () => {
-        Animated.timing(translateY, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true,
-        }).start();
+        Animated.timing(translateY, { toValue: 0, duration: 300, useNativeDriver: true }).start();
     };
-
     const hideTabBar = () => {
-        Animated.timing(translateY, {
-            toValue: -150,
-            duration: 300,
-            useNativeDriver: true,
-        }).start();
+        Animated.timing(translateY, { toValue: -150, duration: 300, useNativeDriver: true }).start();
     };
 
-    // 2. Track where the touch starts
-    const handleTouchStart = (e) => {
-        touchY.current = e.nativeEvent.pageY;
-    };
-
-    // 3. Calculate distance when touch ends to determine gesture
+    const handleTouchStart = (e) => { touchY.current = e.nativeEvent.pageY; };
     const handleTouchEnd = (e) => {
-        const endY = e.nativeEvent.pageY;
-        const distance = endY - touchY.current;
-
-        // Threshold of 30 pixels to differentiate a tap from a swipe
-        if (distance > 30) {
-            // Swiped down
-            showTabBar();
-        } else if (distance < -30) {
-            // Swiped up
-            hideTabBar();
-        }
-        // If distance is between -30 and 30, it was just a tap/click. Do nothing.
+        const d = e.nativeEvent.pageY - touchY.current;
+        if (d > 30) showTabBar();
+        else if (d < -30) hideTabBar();
     };
 
     return (
-        <View
-            style={{ flex: 1, backgroundColor: '#25292e' }}
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-        >
+        <View style={{ flex: 1, backgroundColor: C.bg }} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
             <TopTab
                 screenOptions={{
                     tabBarShowLabel: false,
                     tabBarStyle: {
                         position: 'absolute',
-                        top: 60,
-                        left: 80,
-                        right: 80,
-                        height: 60,
-                        backgroundColor: '#1c1c1e',
-                        borderRadius: 30,
-                        elevation: 5,
-                        shadowColor: '#000',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.3,
+                        top: 60, left: 80, right: 80, height: 60,
+                        backgroundColor: C.surface,
+                        borderRadius: 24,
+                        elevation: 6,
+                        shadowColor: C.shadowDark,
+                        shadowOffset: { width: 5, height: 5 },
+                        shadowOpacity: 0.35,
                         shadowRadius: 10,
-                        borderWidth: 1,
-                        borderColor: 'rgba(255, 255, 255, 0.1)',
                         zIndex: 100,
                         overflow: 'hidden',
-                        transform: [{ translateY: translateY }],
+                        transform: [{ translateY }],
                     },
                     tabBarIndicatorStyle: {
-                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                        height: '70%',
-                        top: '15%',
-                        borderRadius: 25,
-                        width: '28%',
-                        marginLeft: '2.5%',
+                        backgroundColor: C.surfaceDeep,
+                        height: '70%', top: '15%',
+                        borderRadius: 20, width: '28%', marginLeft: '2.5%',
                     },
-                    tabBarActiveTintColor: '#ffffff',
-                    tabBarInactiveTintColor: '#8e8e93',
+                    tabBarActiveTintColor: C.text,
+                    tabBarInactiveTintColor: C.textMuted,
                     swipeEnabled: true,
                 }}
             >
-                <TopTab.Screen
-                    name="home"
-                    options={{
-                        tabBarIcon: ({ color, focused }) => (
-                            <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
-                        ),
-                    }}
-                />
-                <TopTab.Screen
-                    name="chat"
-                    options={{
-                        tabBarIcon: ({ color, focused }) => (
-                            <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={24} color={color} />
-                        ),
-                    }}
-                />
-                <TopTab.Screen
-                    name="settings"
-                    options={{
-                        tabBarIcon: ({ color, focused }) => (
-                            <Ionicons name={focused ? 'settings' : 'settings-outline'} size={24} color={color} />
-                        ),
-                    }}
-                />
+                <TopTab.Screen name="home" options={{
+                    tabBarIcon: ({ color, focused }) => (
+                        <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
+                    ),
+                }} />
+                <TopTab.Screen name="chat" options={{
+                    tabBarIcon: ({ color, focused }) => (
+                        <Ionicons name={focused ? 'chatbubble' : 'chatbubble-outline'} size={24} color={color} />
+                    ),
+                }} />
+                <TopTab.Screen name="settings" options={{
+                    tabBarIcon: ({ color, focused }) => (
+                        <Ionicons name={focused ? 'settings' : 'settings-outline'} size={24} color={color} />
+                    ),
+                }} />
             </TopTab>
         </View>
     );

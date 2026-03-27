@@ -5,21 +5,25 @@ import {
 } from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AI_URL } from '../app/config';
+
 let Audio = null;
-try {
-    Audio = require('expo-av').Audio;
-} catch (e) {
-    console.warn('expo-av native module not available. Voice enrollment will not work in Expo Go.');
+try { Audio = require('expo-av').Audio; } catch (e) {
+    console.warn('expo-av native module not available.');
 }
 
+const C = {
+    bg: '#2c3240', surface: '#323848', surfaceDeep: '#262c38',
+    shadowDark: '#1e222c', text: '#e4e7ed', textMuted: '#8a92a6',
+    icon: '#ffffff', accent: '#e8734a', accentSoft: 'rgba(232, 115, 74, 0.12)',
+    danger: '#ff453a', dangerSoft: 'rgba(255, 69, 58, 0.10)',
+    divider: 'rgba(255, 255, 255, 0.04)', success: '#34d399', successSoft: 'rgba(52, 211, 153, 0.10)',
+};
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
-
 const MIN_SECONDS = 5;
 const MAX_SECONDS = 10;
 
@@ -39,429 +43,216 @@ export default function AddMemberSheet({ visible, onClose }) {
     const timerRef = useRef(null);
     const recordingUriRef = useRef(null);
 
-    // ── slide animation ──────────────────────────────────────────
     useEffect(() => {
         if (visible) {
-            Animated.spring(slideAnim, {
-                toValue: 0,
-                useNativeDriver: true,
-                bounciness: 4,
-                speed: 14,
-            }).start();
-        } else {
-            slideAnim.setValue(SHEET_HEIGHT);
-            resetRecordingState();
-        }
+            Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 4, speed: 14 }).start();
+        } else { slideAnim.setValue(SHEET_HEIGHT); resetRecordingState(); }
     }, [visible]);
 
-    // ── pulse animation for recording ────────────────────────────
     useEffect(() => {
         if (isRecording) {
-            const pulse = Animated.loop(
-                Animated.sequence([
-                    Animated.timing(pulseAnim, {
-                        toValue: 1.25,
-                        duration: 700,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(pulseAnim, {
-                        toValue: 1,
-                        duration: 700,
-                        useNativeDriver: true,
-                    }),
-                ])
-            );
+            const pulse = Animated.loop(Animated.sequence([
+                Animated.timing(pulseAnim, { toValue: 1.25, duration: 700, useNativeDriver: true }),
+                Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+            ]));
             pulse.start();
-
-            const glow = Animated.loop(
-                Animated.sequence([
-                    Animated.timing(glowAnim, {
-                        toValue: 1,
-                        duration: 700,
-                        useNativeDriver: false,
-                    }),
-                    Animated.timing(glowAnim, {
-                        toValue: 0,
-                        duration: 700,
-                        useNativeDriver: false,
-                    }),
-                ])
-            );
+            const glow = Animated.loop(Animated.sequence([
+                Animated.timing(glowAnim, { toValue: 1, duration: 700, useNativeDriver: false }),
+                Animated.timing(glowAnim, { toValue: 0, duration: 700, useNativeDriver: false }),
+            ]));
             glow.start();
-
-            return () => {
-                pulse.stop();
-                glow.stop();
-                pulseAnim.setValue(1);
-                glowAnim.setValue(0);
-            };
+            return () => { pulse.stop(); glow.stop(); pulseAnim.setValue(1); glowAnim.setValue(0); };
         }
     }, [isRecording]);
 
     const resetRecordingState = () => {
-        setIsRecording(false);
-        setRecordingDone(false);
-        setElapsed(0);
-        setEnrolling(false);
+        setIsRecording(false); setRecordingDone(false); setElapsed(0); setEnrolling(false);
         recordingUriRef.current = null;
         if (timerRef.current) clearInterval(timerRef.current);
     };
 
     const handleClose = () => {
-        Animated.timing(slideAnim, {
-            toValue: SHEET_HEIGHT,
-            duration: 250,
-            useNativeDriver: true,
-        }).start(() => onClose());
+        Animated.timing(slideAnim, { toValue: SHEET_HEIGHT, duration: 250, useNativeDriver: true })
+            .start(() => onClose());
     };
 
-    // ── recording logic ──────────────────────────────────────────
     const startRecording = async () => {
         try {
-            if (!Audio) {
-                Alert.alert(
-                    'Not Available',
-                    'Voice recording requires a Development Build. It does not work in Expo Go.'
-                );
-                return;
-            }
+            if (!Audio) { Alert.alert('Not Available', 'Voice recording requires a Development Build.'); return; }
             const { granted } = await Audio.requestPermissionsAsync();
-            if (!granted) {
-                Alert.alert('Permission denied', 'Microphone access is required.');
-                return;
-            }
-
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: true,
-                playsInSilentModeIOS: true,
-            });
-
-            const { recording } = await Audio.Recording.createAsync(
-                Audio.RecordingOptionsPresets.HIGH_QUALITY
-            );
+            if (!granted) { Alert.alert('Permission denied', 'Microphone access is required.'); return; }
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+            const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
             recordingRef.current = recording;
-            setIsRecording(true);
-            setRecordingDone(false);
-            setElapsed(0);
-
-            timerRef.current = setInterval(async () => {
+            setIsRecording(true); setRecordingDone(false); setElapsed(0);
+            timerRef.current = setInterval(() => {
                 setElapsed(prev => {
                     const next = prev + 1;
-                    if (next >= MAX_SECONDS) {
-                        clearInterval(timerRef.current);
-                        stopRecording();
-                    }
+                    if (next >= MAX_SECONDS) { clearInterval(timerRef.current); stopRecording(); }
                     return next;
                 });
             }, 1000);
-
-        } catch (err) {
-            console.error('Failed to start recording:', err);
-            Alert.alert('Error', 'Could not start recording.');
-        }
+        } catch (err) { Alert.alert('Error', 'Could not start recording.'); }
     };
 
     const stopRecording = async () => {
         try {
             if (timerRef.current) clearInterval(timerRef.current);
             if (!recordingRef.current) return;
-
             await recordingRef.current.stopAndUnloadAsync();
-            const uri = recordingRef.current.getURI();
-            recordingUriRef.current = uri;
+            recordingUriRef.current = recordingRef.current.getURI();
             recordingRef.current = null;
-
-            setIsRecording(false);
-            setRecordingDone(true);
-        } catch (err) {
-            console.error('Failed to stop recording:', err);
-        }
+            setIsRecording(false); setRecordingDone(true);
+        } catch (err) { console.error('Failed to stop recording:', err); }
     };
 
-    const handleMicPress = () => {
-        if (isRecording) {
-            stopRecording();
-        } else {
-            startRecording();
-        }
-    };
+    const handleMicPress = () => { isRecording ? stopRecording() : startRecording(); };
 
-    // ── enroll: POST audio to backend ────────────────────────────
     const handleAddMember = async () => {
-        if (!memberName.trim()) {
-            Alert.alert('Missing name', 'Please enter a member name.');
-            return;
-        }
-        if (!recordingDone || !recordingUriRef.current) {
-            Alert.alert('No voice recorded', 'Please record your voice first.');
-            return;
-        }
-        if (elapsed < MIN_SECONDS) {
-            Alert.alert(
-                'Too short',
-                `Recording is only ${elapsed}s. Please record at least ${MIN_SECONDS} seconds.`
-            );
-            return;
-        }
+        if (!memberName.trim()) { Alert.alert('Missing name', 'Please enter a member name.'); return; }
+        if (!recordingDone || !recordingUriRef.current) { Alert.alert('No voice', 'Please record your voice first.'); return; }
+        if (elapsed < MIN_SECONDS) { Alert.alert('Too short', `Please record at least ${MIN_SECONDS}s.`); return; }
 
         setEnrolling(true);
         try {
-            // 1. Read the audio file as a Base64 string
-            // Handle cross-platform: Web cannot use FileSystem.readAsStringAsync
             let audioBase64;
             if (Platform.OS === 'web') {
                 const res = await fetch(recordingUriRef.current);
                 const blob = await res.blob();
                 audioBase64 = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
-                    reader.onloadend = () => {
-                        // result is data:audio/xxx;base64,.... -> split by comma
-                        resolve(reader.result.split(',')[1]);
-                    };
-                    reader.onerror = reject;
-                    reader.readAsDataURL(blob);
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject; reader.readAsDataURL(blob);
                 });
             } else {
-                audioBase64 = await FileSystem.readAsStringAsync(recordingUriRef.current, {
-                    encoding: 'base64',
-                });
+                audioBase64 = await FileSystem.readAsStringAsync(recordingUriRef.current, { encoding: 'base64' });
             }
-
-            // 2. Prepare JSON payload
-            const payload = {
-                user_id: memberName.trim(),
-                file_ext: '.m4a',
-                audio_base64: audioBase64
-            };
-
             const response = await fetch(`${AI_URL}/api/enroll`, {
                 method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload),
+                headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: memberName.trim(), file_ext: '.m4a', audio_base64: audioBase64 }),
             });
-
             const data = await response.json();
-
-            if (!response.ok) {
-                Alert.alert('Enrollment failed', data.detail || 'Unknown error');
-                return;
-            }
-
+            if (!response.ok) { Alert.alert('Failed', data.detail || 'Unknown error'); return; }
             Alert.alert('Success! 🎉', `${memberName} has been enrolled.`);
-            resetRecordingState();
-            setMemberName('');
-            handleClose();
-
-        } catch (err) {
-            console.error('Enroll error:', err);
-            Alert.alert('Network error', 'Could not reach the server.');
-        } finally {
-            setEnrolling(false);
-        }
+            resetRecordingState(); setMemberName(''); handleClose();
+        } catch (err) { Alert.alert('Network error', 'Could not reach the server.'); }
+        finally { setEnrolling(false); }
     };
 
-    // ── timer bar color ──────────────────────────────────────────
-    const timerColor = elapsed < MIN_SECONDS ? '#ffd33d' : '#34d399';
+    const timerColor = elapsed < MIN_SECONDS ? C.accent : C.success;
     const timerProgress = Math.min(elapsed / MAX_SECONDS, 1);
-
-    // ── format time display ──────────────────────────────────────
-    const formatTime = (seconds) => {
-        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
-        const s = String(seconds % 60).padStart(2, '0');
-        return `${m}:${s}`;
-    };
+    const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
     return (
-        <Modal
-            visible={visible}
-            transparent={true}
-            animationType="none"
-            onRequestClose={handleClose}
-        >
-            <KeyboardAvoidingView
-                style={{ flex: 1 }}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
+        <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
                 <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleClose} />
-
                 <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: slideAnim }] }]}>
-                    {/* Handle & Header */}
                     <View style={styles.handleBar} />
 
                     <View style={styles.sheetHeader}>
                         <View style={styles.headerLeft}>
-                            <View style={styles.headerIconContainer}>
-                                <LinearGradient
-                                    colors={['#ffd33d', '#f7b733']}
-                                    style={styles.headerIconGradient}
-                                >
-                                    <Ionicons name="person-add" size={18} color="#1e2124" />
-                                </LinearGradient>
+                            <View style={styles.headerIconWrap}>
+                                <Ionicons name="person-add" size={18} color="#fff" />
                             </View>
                             <View>
                                 <Text style={styles.sheetTitle}>Add Member</Text>
                                 <Text style={styles.sheetSubtitle}>Enroll a new voice profile</Text>
                             </View>
                         </View>
-                        <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                            <Ionicons name="close" size={18} color="#8e8e93" />
+                        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+                            <Ionicons name="close" size={18} color={C.textMuted} />
                         </TouchableOpacity>
                     </View>
 
-                    <ScrollView style={styles.sheetContent} showsVerticalScrollIndicator={false}>
-
-                        {/* ── Name Input Section ── */}
+                    <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+                        {/* Name */}
                         <View style={styles.sectionCard}>
                             <View style={styles.sectionHeader}>
-                                <Ionicons name="person-outline" size={16} color="#ffd33d" />
-                                <Text style={styles.sectionLabel}>Member Name</Text>
+                                <Ionicons name="person-outline" size={16} color={C.icon} />
+                                <Text style={styles.sectionLabel}>MEMBER NAME</Text>
                             </View>
-                            <TextInput
-                                style={styles.sheetInput}
-                                placeholder="Enter member name"
-                                placeholderTextColor="rgba(255, 255, 255, 0.25)"
-                                value={memberName}
-                                onChangeText={setMemberName}
-                            />
+                            <View style={styles.inputBox}>
+                                <TextInput style={styles.sheetInput} placeholder="Enter member name"
+                                    placeholderTextColor={C.textMuted} value={memberName} onChangeText={setMemberName} />
+                            </View>
                         </View>
 
-                        {/* ── Voice Enrollment Section ── */}
+                        {/* Voice */}
                         <View style={styles.sectionCard}>
                             <View style={styles.sectionHeader}>
-                                <Ionicons name="mic-outline" size={16} color="#ffd33d" />
-                                <Text style={styles.sectionLabel}>Voice Enrollment</Text>
+                                <Ionicons name="mic-outline" size={16} color={C.icon} />
+                                <Text style={styles.sectionLabel}>VOICE ENROLLMENT</Text>
                             </View>
-
                             <View style={styles.voiceContainer}>
-                                {/* Mic Button */}
                                 <View style={styles.micArea}>
                                     {isRecording && (
-                                        <Animated.View
-                                            style={[
-                                                styles.pulseRing,
-                                                {
-                                                    transform: [{ scale: pulseAnim }],
-                                                    opacity: glowAnim.interpolate({
-                                                        inputRange: [0, 1],
-                                                        outputRange: [0.4, 0.1],
-                                                    }),
-                                                },
-                                            ]}
-                                        />
+                                        <Animated.View style={[styles.pulseRing, {
+                                            transform: [{ scale: pulseAnim }],
+                                            opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.1] }),
+                                        }]} />
                                     )}
                                     <TouchableOpacity
-                                        style={[
-                                            styles.voiceButton,
-                                            isRecording && styles.voiceButtonRecording,
-                                            recordingDone && styles.voiceButtonDone,
+                                        style={[styles.voiceButton,
+                                            isRecording && { backgroundColor: C.danger },
+                                            recordingDone && { backgroundColor: C.success },
+                                            !isRecording && !recordingDone && { backgroundColor: C.surfaceDeep },
                                         ]}
-                                        onPress={handleMicPress}
-                                        activeOpacity={0.7}
+                                        onPress={handleMicPress} activeOpacity={0.7}
                                     >
-                                        <LinearGradient
-                                            colors={
-                                                isRecording
-                                                    ? ['#ff3b30', '#ff6b5e']
-                                                    : recordingDone
-                                                        ? ['#34d399', '#059669']
-                                                        : ['rgba(255, 211, 61, 0.15)', 'rgba(247, 183, 51, 0.08)']
-                                            }
-                                            style={styles.voiceGradient}
-                                        >
-                                            <Ionicons
-                                                name={
-                                                    isRecording ? 'stop'
-                                                        : recordingDone ? 'checkmark-circle' : 'mic'
-                                                }
-                                                size={isRecording ? 26 : recordingDone ? 30 : 28}
-                                                color={
-                                                    isRecording ? '#fff'
-                                                        : recordingDone ? '#fff' : '#ffd33d'
-                                                }
-                                            />
-                                        </LinearGradient>
+                                        <Ionicons
+                                            name={isRecording ? 'stop' : recordingDone ? 'checkmark-circle' : 'mic'}
+                                            size={isRecording ? 26 : recordingDone ? 30 : 28}
+                                            color={isRecording || recordingDone ? '#fff' : C.icon}
+                                        />
                                     </TouchableOpacity>
                                 </View>
 
-                                {/* Status Area */}
                                 <View style={styles.voiceStatus}>
                                     {!isRecording && !recordingDone && (
                                         <View>
-                                            <Text style={styles.voicePromptTitle}>
-                                                Tap the mic to start
-                                            </Text>
-                                            <Text style={styles.voicePromptBody}>
-                                                Read aloud:
-                                            </Text>
+                                            <Text style={styles.voicePromptTitle}>Tap the mic to start</Text>
+                                            <Text style={styles.voicePromptBody}>Read aloud:</Text>
                                             <View style={styles.quoteCard}>
-                                                <Ionicons name="chatbubble-ellipses-outline" size={14} color="#ffd33d" style={{ marginRight: 8, marginTop: 2 }} />
-                                                <Text style={styles.quoteText}>
-                                                    "Hi one two three, I am so happy to see you"
-                                                </Text>
+                                                <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.accent} style={{ marginRight: 8, marginTop: 2 }} />
+                                                <Text style={styles.quoteText}>"Hi one two three, I am so happy to see you"</Text>
                                             </View>
                                         </View>
                                     )}
-
                                     {isRecording && (
                                         <View>
                                             <View style={styles.recordingBadge}>
                                                 <View style={styles.recordingDot} />
                                                 <Text style={styles.recordingBadgeText}>Recording</Text>
                                             </View>
-
-                                            <Text style={styles.timerText}>
-                                                {formatTime(elapsed)}
-                                                <Text style={styles.timerMax}> / {formatTime(MAX_SECONDS)}</Text>
-                                            </Text>
-
-                                            {/* Progress bar */}
+                                            <Text style={styles.timerText}>{formatTime(elapsed)}<Text style={styles.timerMax}> / {formatTime(MAX_SECONDS)}</Text></Text>
                                             <View style={styles.progressTrack}>
-                                                <Animated.View
-                                                    style={[
-                                                        styles.progressFill,
-                                                        {
-                                                            width: `${timerProgress * 100}%`,
-                                                            backgroundColor: timerColor,
-                                                        }
-                                                    ]}
-                                                />
+                                                <Animated.View style={[styles.progressFill, { width: `${timerProgress * 100}%`, backgroundColor: timerColor }]} />
                                                 <View style={styles.progressMarker} />
                                             </View>
-
                                             <View style={styles.progressLabels}>
                                                 <Text style={styles.progressLabelText}>0s</Text>
-                                                <Text style={[
-                                                    styles.progressLabelText,
-                                                    elapsed >= MIN_SECONDS && { color: '#34d399' }
-                                                ]}>
-                                                    {MIN_SECONDS}s min
-                                                </Text>
+                                                <Text style={[styles.progressLabelText, elapsed >= MIN_SECONDS && { color: C.success }]}>{MIN_SECONDS}s min</Text>
                                                 <Text style={styles.progressLabelText}>{MAX_SECONDS}s</Text>
                                             </View>
-
                                             {elapsed >= MIN_SECONDS && (
                                                 <View style={styles.goodBadge}>
-                                                    <Ionicons name="checkmark-circle" size={14} color="#34d399" />
-                                                    <Text style={styles.goodBadgeText}>Good length! Tap stop when ready.</Text>
+                                                    <Ionicons name="checkmark-circle" size={14} color={C.success} />
+                                                    <Text style={styles.goodBadgeText}>Good length! Tap stop.</Text>
                                                 </View>
                                             )}
                                         </View>
                                     )}
-
                                     {recordingDone && (
                                         <View>
                                             <View style={styles.doneBadge}>
-                                                <Ionicons name="checkmark-circle" size={16} color="#34d399" />
+                                                <Ionicons name="checkmark-circle" size={16} color={C.success} />
                                                 <Text style={styles.doneBadgeText}>Voice Recorded</Text>
                                             </View>
-                                            <Text style={styles.doneDetail}>
-                                                Duration: {elapsed}s
-                                            </Text>
+                                            <Text style={styles.doneDetail}>Duration: {elapsed}s</Text>
                                             <TouchableOpacity style={styles.reRecordBtn} onPress={handleMicPress}>
-                                                <Ionicons name="refresh" size={14} color="#ffd33d" />
+                                                <Ionicons name="refresh" size={14} color={C.icon} />
                                                 <Text style={styles.reRecordText}>Re-record</Text>
                                             </TouchableOpacity>
                                         </View>
@@ -470,59 +261,27 @@ export default function AddMemberSheet({ visible, onClose }) {
                             </View>
                         </View>
 
-                        {/* ── Divider with OR ── */}
                         <View style={styles.dividerRow}>
-                            <View style={styles.dividerLine} />
-                            <Text style={styles.dividerText}>OR</Text>
-                            <View style={styles.dividerLine} />
+                            <View style={styles.dividerLine} /><Text style={styles.dividerText}>OR</Text><View style={styles.dividerLine} />
                         </View>
 
-                        {/* ── Search History ── */}
-                        <TouchableOpacity
-                            style={styles.historyItem}
-                            onPress={() => {
-                                handleClose();
-                                router.push('/Voice_History');
-                            }}
-                            activeOpacity={0.7}
-                        >
-                            <View style={styles.historyIconContainer}>
-                                <Ionicons name="time-outline" size={18} color="#ffd33d" />
+                        <TouchableOpacity style={styles.historyItem} onPress={() => { handleClose(); router.push('/Voice_History'); }} activeOpacity={0.7}>
+                            <View style={styles.historyIconWrap}>
+                                <Ionicons name="time-outline" size={18} color={C.icon} />
                             </View>
-                            <View style={styles.historyTextContainer}>
-                                <Text style={styles.historyItemTitle}>Search History</Text>
-                                <Text style={styles.historyItemSub}>Browse previous voice enrollments</Text>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.historyTitle}>Search History</Text>
+                                <Text style={styles.historySub}>Browse previous enrollments</Text>
                             </View>
-                            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+                            <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
                         </TouchableOpacity>
 
-                        {/* ── Add Button ── */}
-                        <TouchableOpacity
-                            style={[styles.addButton, enrolling && { opacity: 0.6 }]}
-                            onPress={handleAddMember}
-                            disabled={enrolling}
-                            activeOpacity={0.85}
-                        >
-                            <LinearGradient
-                                colors={['#ffd33d', '#f7b733']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.addButtonGradient}
-                            >
-                                {enrolling ? (
-                                    <View style={styles.enrollingRow}>
-                                        <Ionicons name="sync" size={18} color="#1e2124" style={{ marginRight: 8 }} />
-                                        <Text style={styles.addButtonText}>Enrolling...</Text>
-                                    </View>
-                                ) : (
-                                    <View style={styles.enrollingRow}>
-                                        <Ionicons name="person-add" size={18} color="#1e2124" style={{ marginRight: 8 }} />
-                                        <Text style={styles.addButtonText}>Add Member</Text>
-                                    </View>
-                                )}
-                            </LinearGradient>
+                        <TouchableOpacity style={[styles.addButton, enrolling && { opacity: 0.6 }]} onPress={handleAddMember} disabled={enrolling} activeOpacity={0.85}>
+                            <View style={styles.addButtonInner}>
+                                <Ionicons name={enrolling ? "sync" : "person-add"} size={18} color="#fff" style={{ marginRight: 8 }} />
+                                <Text style={styles.addButtonText}>{enrolling ? 'Enrolling...' : 'Add Member'}</Text>
+                            </View>
                         </TouchableOpacity>
-
                         <View style={{ height: 30 }} />
                     </ScrollView>
                 </Animated.View>
@@ -532,389 +291,73 @@ export default function AddMemberSheet({ visible, onClose }) {
 }
 
 const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    },
+    overlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.55)' },
     bottomSheet: {
-        position: 'absolute',
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: SHEET_HEIGHT,
-        backgroundColor: '#1a1d21',
-        borderTopLeftRadius: 28,
-        borderTopRightRadius: 28,
-        paddingHorizontal: 22,
-        paddingBottom: 30,
-        borderTopWidth: 1,
-        borderColor: 'rgba(255, 211, 61, 0.08)',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: -12 },
-        shadowOpacity: 0.5,
-        shadowRadius: 25,
-        elevation: 25,
+        position: 'absolute', bottom: 0, left: 0, right: 0, height: SHEET_HEIGHT,
+        backgroundColor: C.bg, borderTopLeftRadius: 28, borderTopRightRadius: 28,
+        paddingHorizontal: 22, paddingBottom: 30,
+        shadowColor: C.shadowDark, shadowOffset: { width: 0, height: -12 }, shadowOpacity: 0.5, shadowRadius: 25, elevation: 25,
     },
-    handleBar: {
-        width: 36,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.15)',
-        alignSelf: 'center',
-        marginTop: 10,
-        marginBottom: 18,
+    handleBar: { width: 36, height: 4, borderRadius: 2, backgroundColor: C.surfaceDeep, alignSelf: 'center', marginTop: 10, marginBottom: 18 },
+    sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+    headerLeft: { flexDirection: 'row', alignItems: 'center' },
+    headerIconWrap: {
+        width: 40, height: 40, borderRadius: 14, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center', marginRight: 14,
+        shadowColor: C.accent, shadowOffset: { width: 3, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
     },
-
-    // ── Header ──
-    sheetHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 24,
-    },
-    headerLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    headerIconContainer: {
-        marginRight: 14,
-    },
-    headerIconGradient: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    sheetTitle: {
-        color: '#fff',
-        fontSize: 20,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
-    },
-    sheetSubtitle: {
-        color: 'rgba(255, 255, 255, 0.4)',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginTop: 1,
-    },
-    closeButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    sheetContent: {
-        flex: 1,
-    },
-
-    // ── Section Card ──
+    sheetTitle: { color: C.text, fontSize: 20, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
+    sheetSubtitle: { color: C.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginTop: 1 },
+    closeBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: C.surface, justifyContent: 'center', alignItems: 'center' },
     sectionCard: {
-        backgroundColor: 'rgba(255, 255, 255, 0.04)',
-        borderRadius: 18,
-        padding: 18,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.06)',
+        backgroundColor: C.surface, borderRadius: 22, padding: 18, marginBottom: 16,
+        shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
     },
-    sectionHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 14,
-    },
-    sectionLabel: {
-        color: 'rgba(255, 255, 255, 0.5)',
-        fontSize: 12,
-        fontFamily: 'Garamond-Regular',
-        textTransform: 'uppercase',
-        letterSpacing: 1.2,
-        marginLeft: 8,
-    },
-    sheetInput: {
-        backgroundColor: 'rgba(255, 255, 255, 0.06)',
-        borderRadius: 14,
-        padding: 15,
-        color: '#fff',
-        fontSize: 16,
-        fontFamily: 'Garamond-Regular',
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.08)',
-    },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+    sectionLabel: { color: C.textMuted, fontSize: 11, fontFamily: 'Garamond-Regular', textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 8 },
+    inputBox: { backgroundColor: C.surfaceDeep, borderRadius: 16, overflow: 'hidden' },
+    sheetInput: { padding: 15, color: C.text, fontSize: 16, fontFamily: 'Garamond-Regular' },
 
-    // ── Voice Section ──
-    voiceContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-    },
-    micArea: {
-        position: 'relative',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 72,
-        height: 72,
-    },
-    pulseRing: {
-        position: 'absolute',
-        width: 72,
-        height: 72,
-        borderRadius: 36,
-        backgroundColor: '#ff3b30',
-    },
-    voiceButton: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        overflow: 'hidden',
-        borderWidth: 1.5,
-        borderColor: 'rgba(255, 211, 61, 0.25)',
-    },
-    voiceButtonRecording: {
-        borderColor: 'rgba(255, 59, 48, 0.6)',
-        borderWidth: 2,
-    },
-    voiceButtonDone: {
-        borderColor: 'rgba(52, 211, 153, 0.5)',
-        borderWidth: 1.5,
-    },
-    voiceGradient: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    voiceStatus: {
-        flex: 1,
-        marginLeft: 16,
-        justifyContent: 'center',
-    },
-
-    // ── Voice prompts ──
-    voicePromptTitle: {
-        color: 'rgba(255, 255, 255, 0.7)',
-        fontSize: 15,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-        marginBottom: 4,
-    },
-    voicePromptBody: {
-        color: 'rgba(255, 255, 255, 0.4)',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginBottom: 8,
-    },
-    quoteCard: {
-        flexDirection: 'row',
-        backgroundColor: 'rgba(255, 211, 61, 0.06)',
-        borderRadius: 10,
-        padding: 10,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 211, 61, 0.12)',
-    },
-    quoteText: {
-        color: '#ffd33d',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        fontStyle: 'italic',
-        flex: 1,
-        lineHeight: 18,
-    },
-
-    // ── Recording active ──
-    recordingBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 8,
-    },
-    recordingDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#ff3b30',
-        marginRight: 6,
-    },
-    recordingBadgeText: {
-        color: '#ff6b5e',
-        fontSize: 13,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: 0.8,
-    },
-    timerText: {
-        color: '#fff',
-        fontSize: 22,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
-        marginBottom: 10,
-    },
-    timerMax: {
-        color: 'rgba(255, 255, 255, 0.3)',
-        fontSize: 14,
-        fontWeight: 'normal',
-    },
-    progressTrack: {
-        height: 6,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-        borderRadius: 3,
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    progressFill: {
-        height: '100%',
-        borderRadius: 3,
-    },
-    progressMarker: {
-        position: 'absolute',
-        left: '50%',   // 5s out of 10s = 50%
-        top: 0,
-        bottom: 0,
-        width: 2,
-        backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    },
-    progressLabels: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginTop: 5,
-    },
-    progressLabelText: {
-        color: 'rgba(255, 255, 255, 0.3)',
-        fontSize: 10,
-        fontFamily: 'Garamond-Regular',
-    },
-    goodBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginTop: 8,
-        backgroundColor: 'rgba(52, 211, 153, 0.08)',
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 8,
-        alignSelf: 'flex-start',
-    },
-    goodBadgeText: {
-        color: '#34d399',
-        fontSize: 12,
-        fontFamily: 'Garamond-Regular',
-        marginLeft: 5,
-    },
-
-    // ── Done state ──
-    doneBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 6,
-    },
-    doneBadgeText: {
-        color: '#34d399',
-        fontSize: 15,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-        marginLeft: 6,
-    },
-    doneDetail: {
-        color: 'rgba(255, 255, 255, 0.4)',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginBottom: 10,
-    },
-    reRecordBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        alignSelf: 'flex-start',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 211, 61, 0.2)',
-        backgroundColor: 'rgba(255, 211, 61, 0.05)',
-    },
-    reRecordText: {
-        color: '#ffd33d',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginLeft: 5,
-    },
-
-    // ── Divider ──
-    dividerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginVertical: 8,
-    },
-    dividerLine: {
-        flex: 1,
-        height: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.06)',
-    },
-    dividerText: {
-        color: 'rgba(255, 255, 255, 0.25)',
-        fontSize: 12,
-        fontFamily: 'Garamond-Regular',
-        letterSpacing: 1,
-        marginHorizontal: 16,
-    },
-
-    // ── History ──
+    voiceContainer: { flexDirection: 'row', alignItems: 'flex-start' },
+    micArea: { position: 'relative', justifyContent: 'center', alignItems: 'center', width: 72, height: 72 },
+    pulseRing: { position: 'absolute', width: 72, height: 72, borderRadius: 36, backgroundColor: C.danger },
+    voiceButton: { width: 60, height: 60, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
+    voiceStatus: { flex: 1, marginLeft: 16, justifyContent: 'center' },
+    voicePromptTitle: { color: C.text, fontSize: 15, fontFamily: 'Garamond-Bold', fontWeight: '600', marginBottom: 4 },
+    voicePromptBody: { color: C.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginBottom: 8 },
+    quoteCard: { flexDirection: 'row', backgroundColor: C.accentSoft, borderRadius: 14, padding: 12 },
+    quoteText: { color: C.accent, fontSize: 13, fontFamily: 'Garamond-Regular', fontStyle: 'italic', flex: 1, lineHeight: 18 },
+    recordingBadge: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.danger, marginRight: 6 },
+    recordingBadgeText: { color: C.danger, fontSize: 13, fontFamily: 'Garamond-Bold', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
+    timerText: { color: C.text, fontSize: 22, fontFamily: 'Garamond-Bold', fontWeight: 'bold', marginBottom: 10 },
+    timerMax: { color: C.textMuted, fontSize: 14, fontWeight: 'normal' },
+    progressTrack: { height: 6, backgroundColor: C.surfaceDeep, borderRadius: 3, overflow: 'hidden', position: 'relative' },
+    progressFill: { height: '100%', borderRadius: 3 },
+    progressMarker: { position: 'absolute', left: '50%', top: 0, bottom: 0, width: 2, backgroundColor: C.textMuted },
+    progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+    progressLabelText: { color: C.textMuted, fontSize: 10, fontFamily: 'Garamond-Regular' },
+    goodBadge: { flexDirection: 'row', alignItems: 'center', marginTop: 8, backgroundColor: C.successSoft, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, alignSelf: 'flex-start' },
+    goodBadgeText: { color: C.success, fontSize: 12, fontFamily: 'Garamond-Regular', marginLeft: 5 },
+    doneBadge: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
+    doneBadgeText: { color: C.success, fontSize: 15, fontFamily: 'Garamond-Bold', fontWeight: '600', marginLeft: 6 },
+    doneDetail: { color: C.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginBottom: 10 },
+    reRecordBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.surfaceDeep },
+    reRecordText: { color: C.text, fontSize: 13, fontFamily: 'Garamond-Regular', marginLeft: 5 },
+    dividerRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 8 },
+    dividerLine: { flex: 1, height: 1, backgroundColor: C.divider },
+    dividerText: { color: C.textMuted, fontSize: 12, fontFamily: 'Garamond-Regular', letterSpacing: 1, marginHorizontal: 16 },
     historyItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        marginBottom: 20,
-        backgroundColor: 'rgba(255, 255, 255, 0.04)',
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255, 255, 255, 0.06)',
+        flexDirection: 'row', alignItems: 'center', padding: 16, marginBottom: 20,
+        backgroundColor: C.surface, borderRadius: 18,
+        shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
     },
-    historyIconContainer: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        backgroundColor: 'rgba(255, 211, 61, 0.08)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 14,
-    },
-    historyTextContainer: {
-        flex: 1,
-    },
-    historyItemTitle: {
-        color: '#fff',
-        fontSize: 16,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: '600',
-    },
-    historyItemSub: {
-        color: 'rgba(255, 255, 255, 0.35)',
-        fontSize: 13,
-        fontFamily: 'Garamond-Regular',
-        marginTop: 2,
-    },
-
-    // ── Add Button ──
+    historyIconWrap: { width: 40, height: 40, borderRadius: 14, backgroundColor: C.surfaceDeep, justifyContent: 'center', alignItems: 'center', marginRight: 14 },
+    historyTitle: { color: C.text, fontSize: 16, fontFamily: 'Garamond-Bold', fontWeight: '600' },
+    historySub: { color: C.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginTop: 2 },
     addButton: {
-        borderRadius: 16,
-        overflow: 'hidden',
-        shadowColor: '#ffd33d',
-        shadowOffset: { width: 0, height: 6 },
-        shadowOpacity: 0.25,
-        shadowRadius: 12,
-        elevation: 10,
+        borderRadius: 20, overflow: 'hidden',
+        shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 10,
     },
-    addButtonGradient: {
-        paddingVertical: 16,
-        alignItems: 'center',
-        borderRadius: 16,
-    },
-    enrollingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    addButtonText: {
-        color: '#1e2124',
-        fontSize: 17,
-        fontFamily: 'Garamond-Bold',
-        fontWeight: 'bold',
-    },
+    addButtonInner: { backgroundColor: C.accent, paddingVertical: 16, alignItems: 'center', borderRadius: 20, flexDirection: 'row', justifyContent: 'center' },
+    addButtonText: { color: '#fff', fontSize: 17, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
 });
