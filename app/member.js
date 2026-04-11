@@ -57,7 +57,7 @@ export default function Member() {
     return (
         <View style={styles.container}>
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.pillButton}>
+                <TouchableOpacity onPress={() => router.canGoBack() ? router.back() : router.replace('/settings')} style={styles.pillButton}>
                     <Ionicons name="chevron-back" size={24} color={COLORS.icon} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Members</Text>
