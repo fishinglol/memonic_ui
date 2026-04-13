@@ -43,9 +43,9 @@ export default function Home() {
         try {
             const res = await fetch(`${AI_BASE_URL}/api/get-home-data/fish`);
             const data = await res.json();
-            if (res.ok) {
-                setHighlights(data.highlights);
-                setAiTasks(data.tasks.map((text, i) => ({ id: String(i + 1), text, done: false })));
+            if (res.ok && !data.error) {
+                setHighlights(data.highlights || 'Start talking to Memonic to see your highlights.');
+                setAiTasks((data.tasks || []).map((text, i) => ({ id: String(i + 1), text, done: false })));
                 setUpdatedAt(data.updated_at);
             }
         } catch (e) {
