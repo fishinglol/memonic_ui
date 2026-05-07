@@ -6,11 +6,13 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URL } from './config';
 import { COLORS, SHADOWS } from './theme';
+import { useMemonicBLE } from '../hooks/useMemonicBLE';
 
 export default function Index() {
   const [userName, setUserName] = useState('');
   const [password, setPassword] = useState('');
   const router = useRouter();
+  const { isConnected, isReceiving, lastMemory } = useMemonicBLE();
 
   const handleLogin = async () => {
     if (userName.trim().length === 0 || password.trim().length === 0) {
@@ -56,6 +58,18 @@ export default function Index() {
 
       <View style={styles.header}>
         <Text style={styles.title}>Memonic</Text>
+        <View style={styles.bleBadge}>
+          <Text style={styles.bleText}>
+            {isConnected ? 'Memonic Connected 🟢' : 'Searching... 🔴'}
+          </Text>
+          {isReceiving && <Text style={styles.receivingText}>Receiving memory...</Text>}
+        </View>
+        {lastMemory && (
+          <View style={styles.memoryContainer}>
+            <Text style={styles.memoryTitle}>Latest Memory:</Text>
+            <Text style={styles.memoryText} numberOfLines={3}>{lastMemory}</Text>
+          </View>
+        )}
       </View>
       <View style={styles.sub_header}>
         <Text style={styles.sub_title}>Welcome To Make Your Life Memorable</Text>
@@ -109,11 +123,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(44, 50, 64, 0.55)',
   },
   header: {
-    height: 240, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', gap: 10,
+    height: 240, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', gap: 10, marginTop: 20
   },
   title: {
     fontFamily: 'Garamond-Bold', fontSize: 64, fontWeight: 'bold', color: '#fff',
   },
+  bleBadge: {
+    backgroundColor: 'rgba(0,0,0,0.5)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    alignItems: 'center'
+  },
+  bleText: { color: '#fff', fontSize: 14, fontFamily: 'Garamond-Bold' },
+  receivingText: { color: COLORS.accent, fontSize: 12, marginTop: 2, fontFamily: 'Garamond-Regular' },
+  memoryContainer: {
+    backgroundColor: 'rgba(255,255,255,0.1)', padding: 10, borderRadius: 12, marginTop: 10, width: '80%', alignItems: 'center'
+  },
+  memoryTitle: { color: COLORS.accent, fontSize: 14, fontFamily: 'Garamond-Bold' },
+  memoryText: { color: '#fff', fontSize: 14, fontFamily: 'Garamond-Regular', textAlign: 'center', marginTop: 4 },
   sub_header: {},
   sub_title: {
     fontFamily: 'Garamond-Regular', fontSize: 20, fontWeight: '600', color: COLORS.text,

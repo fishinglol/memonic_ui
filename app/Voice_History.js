@@ -1,38 +1,64 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList } from 'react-native';
-import React from 'react';
+import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL } from './config';
 import { COLORS, SHADOWS } from './theme';
-
-// Placeholder data — replace with real data later
-const VOICE_HISTORY = [
-    { id: '1', name: 'John', date: 'Mar 5, 2026', duration: '0:32', status: 'Enrolled' },
-    { id: '2', name: 'Sarah', date: 'Mar 4, 2026', duration: '0:28', status: 'Enrolled' },
-    { id: '3', name: 'Mike', date: 'Mar 3, 2026', duration: '0:45', status: 'Pending' },
-];
 
 export default function VoiceHistory() {
     const router = useRouter();
+
+    const [memories, setMemories] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loading, setLoading] = useState(true);
+
+    const fetchMemories = async () => {
+        try {
+            const userId = await AsyncStorage.getItem('user_id');
+            let url = `${API_URL}/api/memories`;
+            if (userId) {
+                url += `?user_id=${userId}`;
+            }
+            const response = await fetch(url);
+            if (response.ok) {
+                const data = await response.json();
+                setMemories(Array.isArray(data) ? data : data.memories || []);
+            }
+        } catch (error) {
+            console.error('Error fetching memories:', error);
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchMemories();
+    }, []);
+
+    const onRefresh = useCallback(() => {
+        setRefreshing(true);
+        fetchMemories();
+    }, []);
 
     const renderItem = ({ item }) => (
         <View style={styles.historyCard}>
             <View style={styles.cardLeft}>
                 <View style={styles.avatarCircle}>
-                    <Ionicons name="person" size={20} color={COLORS.icon} />
+                    <Ionicons name="mic" size={20} color={COLORS.icon} />
                 </View>
                 <View style={styles.cardInfo}>
-                    <Text style={styles.cardName}>{item.name}</Text>
-                    <Text style={styles.cardDate}>{item.date} · {item.duration}</Text>
+                    <Text style={styles.cardName} numberOfLines={2}>{item.transcript || 'No transcript'}</Text>
+                    <Text style={styles.cardDate}>
+                        {item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Just now'} · {item.speaker || 'Unknown'}
+                    </Text>
                 </View>
             </View>
-            <View style={[
-                styles.statusBadge,
-                item.status === 'Enrolled' ? styles.statusEnrolled : styles.statusPending,
-            ]}>
-                <Text style={[
-                    styles.statusText,
-                    item.status === 'Enrolled' ? styles.statusTextEnrolled : styles.statusTextPending,
-                ]}>{item.status}</Text>
+            <View style={[styles.statusBadge, styles.statusEnrolled]}>
+                <Text style={[styles.statusText, styles.statusTextEnrolled]}>
+                    {item.emotion || 'Neutral'}
+                </Text>
             </View>
         </View>
     );
@@ -48,21 +74,28 @@ export default function VoiceHistory() {
                 <View style={{ width: 44 }} />
             </View>
 
-            {VOICE_HISTORY.length > 0 ? (
+            {loading ? (
+                <View style={styles.emptyState}>
+                    <ActivityIndicator size="large" color={COLORS.accent} />
+                </View>
+            ) : memories.length > 0 ? (
                 <FlatList
-                    data={VOICE_HISTORY}
+                    data={memories}
                     renderItem={renderItem}
-                    keyExtractor={(item) => item.id}
+                    keyExtractor={(item, index) => item.id ? item.id.toString() : index.toString()}
                     contentContainerStyle={styles.listContent}
                     showsVerticalScrollIndicator={false}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
+                    }
                 />
             ) : (
                 <View style={styles.emptyState}>
                     <View style={styles.emptyIconWrap}>
                         <Ionicons name="mic-off-outline" size={48} color={COLORS.textMuted} />
                     </View>
-                    <Text style={styles.emptyTitle}>No Voice History</Text>
-                    <Text style={styles.emptySubtitle}>Voice enrollments will appear here.</Text>
+                    <Text style={styles.emptyTitle}>No Memories</Text>
+                    <Text style={styles.emptySubtitle}>Your recorded memories will appear here.</Text>
                 </View>
             )}
         </View>
