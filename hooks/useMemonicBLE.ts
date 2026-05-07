@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
+import { Platform } from 'react-native';
 import { BleManager, Device } from 'react-native-ble-plx';
 import * as FileSystem from 'expo-file-system/legacy';
 import { toByteArray, fromByteArray } from 'base64-js';
-import { API_URL } from '../app/config';
+import { API_URL, AI_URL } from '../app/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
@@ -19,6 +20,11 @@ export const useMemonicBLE = () => {
     const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
+        if (Platform.OS === 'web') {
+            console.log('Bluetooth is not supported on web. Mocking BLE connection.');
+            return;
+        }
+
         managerRef.current = new BleManager();
         scanAndConnect();
 
@@ -92,21 +98,39 @@ export const useMemonicBLE = () => {
         );
     };
 
+    const [currentMode, setCurrentMode] = useState<string | null>(null);
+
     const handleIncomingData = async (base64Data: string) => {
         const decoded = toByteArray(base64Data);
-        // Check for 'END' string safely
-        const isEnd = decoded.length >= 3 && 
-            decoded[0] === 69 && // 'E'
-            decoded[1] === 78 && // 'N'
-            decoded[2] === 68;   // 'D'
         
-        if (isEnd) {
-            setIsReceiving(false);
-            await processAudioBuffer();
-        } else {
+        // Convert to string to check if it's a command
+        const textStr = String.fromCharCode.apply(null, Array.from(decoded));
+        
+        if (textStr.startsWith('START')) {
             setIsReceiving(true);
-            audioBufferRef.current.push(...Array.from(decoded));
+            setCurrentMode('START');
+            audioBufferRef.current = [];
+            return;
         }
+        
+        if (textStr.startsWith('ENROLL')) {
+            setIsReceiving(true);
+            setCurrentMode(textStr);
+            audioBufferRef.current = [];
+            return;
+        }
+
+        if (textStr.startsWith('END')) {
+            setIsReceiving(false);
+            const modeToProcess = currentMode;
+            setCurrentMode(null);
+            await processAudioBuffer(modeToProcess);
+            return;
+        }
+
+        // It's binary audio data
+        setIsReceiving(true);
+        audioBufferRef.current.push(...Array.from(decoded));
     };
 
     const createWavHeader = (dataLength: number) => {
@@ -130,7 +154,7 @@ export const useMemonicBLE = () => {
         return header;
     };
 
-    const processAudioBuffer = async () => {
+    const processAudioBuffer = async (mode: string | null) => {
         if (audioBufferRef.current.length === 0) return;
 
         const pcmData = new Uint8Array(audioBufferRef.current);
@@ -148,13 +172,13 @@ export const useMemonicBLE = () => {
             await FileSystem.writeAsStringAsync(fileUri, base64Wav, {
                 encoding: FileSystem.EncodingType.Base64,
             });
-            await uploadAudio(fileUri);
+            await uploadAudio(fileUri, mode);
         } catch (error) {
             console.error('Error saving or uploading audio:', error);
         }
     };
 
-    const uploadAudio = async (fileUri: string) => {
+    const uploadAudio = async (fileUri: string, mode: string | null) => {
         const userId = await AsyncStorage.getItem('user_id');
         
         const formData = new FormData();
@@ -164,17 +188,19 @@ export const useMemonicBLE = () => {
             type: 'audio/wav',
         } as any);
 
+        if (mode && mode.startsWith('ENROLL')) {
+            const enrollName = mode.replace('ENROLL', '').trim();
+            formData.append('enroll_user', enrollName);
+        }
+
         if (userId) {
             formData.append('user_id', userId);
         }
 
         try {
-            const response = await fetch(`${API_URL}/audio`, {
+            const response = await fetch(`${AI_URL}/audio`, {
                 method: 'POST',
                 body: formData,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
             });
 
             if (response.ok) {
