@@ -279,5 +279,26 @@ export const useMemonicBLE = () => {
         }
     };
 
-    return { isConnected, isReceiving, lastMemory };
+    const sendEnrollCommand = async (name: string) => {
+        if (!deviceRef.current) {
+            console.error('No device connected');
+            return;
+        }
+
+        const cmd = `ENROLL ${name}`;
+        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
+
+        try {
+            await deviceRef.current.writeCharacteristicWithResponseForService(
+                SERVICE_UUID,
+                CHARACTERISTIC_UUID,
+                base64Cmd
+            );
+            console.log('Enroll command sent:', cmd);
+        } catch (error) {
+            console.error('Failed to send enroll command:', error);
+        }
+    };
+
+    return { isConnected, isReceiving, lastMemory, sendEnrollCommand };
 };

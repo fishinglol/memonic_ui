@@ -27,17 +27,22 @@ const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
 const MIN_SECONDS = 5;
 const MAX_SECONDS = 10;
 
+import { useMemonicBLE } from '../hooks/useMemonicBLE';
+
 export default function AddMemberSheet({ visible, onClose }) {
+    const { isConnected, isReceiving: isBLEReceiving, sendEnrollCommand } = useMemonicBLE();
     const router = useRouter();
     const slideAnim = useRef(new Animated.Value(SHEET_HEIGHT)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const glowAnim = useRef(new Animated.Value(0)).current;
 
     const [memberName, setMemberName] = useState('');
-    const [isRecording, setIsRecording] = useState(false);
+    const [isLocalRecording, setIsLocalRecording] = useState(false);
     const [recordingDone, setRecordingDone] = useState(false);
     const [elapsed, setElapsed] = useState(0);
     const [enrolling, setEnrolling] = useState(false);
+
+    const isRecording = isLocalRecording || isBLEReceiving;
 
     const recordingRef = useRef(null);
     const timerRef = useRef(null);
@@ -48,6 +53,26 @@ export default function AddMemberSheet({ visible, onClose }) {
             Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, bounciness: 4, speed: 14 }).start();
         } else { slideAnim.setValue(SHEET_HEIGHT); resetRecordingState(); }
     }, [visible]);
+
+    // Handle BLE recording timeout/completion
+    useEffect(() => {
+        if (isBLEReceiving) {
+            setRecordingDone(false);
+            setElapsed(0);
+            if (timerRef.current) clearInterval(timerRef.current);
+            timerRef.current = setInterval(() => {
+                setElapsed(prev => {
+                    const next = prev + 1;
+                    if (next >= 7) { // Bracelet records for 7s for enrollment
+                        clearInterval(timerRef.current);
+                    }
+                    return next;
+                });
+            }, 1000);
+        } else if (elapsed >= 7) {
+            setRecordingDone(true);
+        }
+    }, [isBLEReceiving]);
 
     useEffect(() => {
         if (isRecording) {
@@ -66,7 +91,7 @@ export default function AddMemberSheet({ visible, onClose }) {
     }, [isRecording]);
 
     const resetRecordingState = () => {
-        setIsRecording(false); setRecordingDone(false); setElapsed(0); setEnrolling(false);
+        setIsLocalRecording(false); setRecordingDone(false); setElapsed(0); setEnrolling(false);
         recordingUriRef.current = null;
         if (timerRef.current) clearInterval(timerRef.current);
     };
@@ -76,7 +101,7 @@ export default function AddMemberSheet({ visible, onClose }) {
             .start(() => onClose());
     };
 
-    const startRecording = async () => {
+    const startLocalRecording = async () => {
         try {
             if (!Audio) { Alert.alert('Not Available', 'Voice recording requires a Development Build.'); return; }
             const { granted } = await Audio.requestPermissionsAsync();
@@ -84,29 +109,44 @@ export default function AddMemberSheet({ visible, onClose }) {
             await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
             const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
             recordingRef.current = recording;
-            setIsRecording(true); setRecordingDone(false); setElapsed(0);
+            setIsLocalRecording(true); setRecordingDone(false); setElapsed(0);
             timerRef.current = setInterval(() => {
                 setElapsed(prev => {
                     const next = prev + 1;
-                    if (next >= MAX_SECONDS) { clearInterval(timerRef.current); stopRecording(); }
+                    if (next >= MAX_SECONDS) { clearInterval(timerRef.current); stopLocalRecording(); }
                     return next;
                 });
             }, 1000);
         } catch (err) { Alert.alert('Error', 'Could not start recording.'); }
     };
 
-    const stopRecording = async () => {
+    const stopLocalRecording = async () => {
         try {
             if (timerRef.current) clearInterval(timerRef.current);
             if (!recordingRef.current) return;
             await recordingRef.current.stopAndUnloadAsync();
             recordingUriRef.current = recordingRef.current.getURI();
             recordingRef.current = null;
-            setIsRecording(false); setRecordingDone(true);
+            setIsLocalRecording(false); setRecordingDone(true);
         } catch (err) { console.error('Failed to stop recording:', err); }
     };
 
-    const handleMicPress = () => { isRecording ? stopRecording() : startRecording(); };
+    const handleMicPress = () => {
+        if (isConnected) {
+            if (!memberName.trim()) {
+                Alert.alert('Missing name', 'Please enter a member name first.');
+                return;
+            }
+            if (isBLEReceiving) {
+                // Cannot stop BLE recording manually from phone in current firmware
+                // but we can just wait for it to finish.
+                return;
+            }
+            sendEnrollCommand(memberName.trim());
+        } else {
+            isLocalRecording ? stopLocalRecording() : startLocalRecording();
+        }
+    };
 
     const handleAddMember = async () => {
         if (!memberName.trim()) { Alert.alert('Missing name', 'Please enter a member name.'); return; }
