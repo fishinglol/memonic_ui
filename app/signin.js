@@ -5,8 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { COLORS, SHADOWS } from './theme';
-import { API_URL } from './config';
+import { COLORS, SHADOWS } from '../constants/theme';
+import { API_URL } from '../constants/config';
 
 export default function SignIn() {
   const [userName, setUserName] = useState('');

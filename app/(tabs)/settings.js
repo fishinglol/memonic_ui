@@ -3,8 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { COLORS, SHADOWS } from '../theme';
-import { AI_URL } from '../config';
+import { COLORS, SHADOWS } from '../../constants/theme';
+import { AI_URL } from '../../constants/config';
 
 // Re-export theme values from the parent config
 // (we import from ../app/theme via a small bridge)

@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from './config';
-import { COLORS, SHADOWS } from './theme';
+import { API_URL } from '../constants/config';
+import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function VoiceHistory() {
     const router = useRouter();

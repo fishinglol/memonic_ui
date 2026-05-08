@@ -1,8 +1,8 @@
 import { Text, View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert } from 'react-native';
 import React, { useState, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SHADOWS } from '../theme';
-import { AI_URL } from '../config';
+import { COLORS, SHADOWS } from '../../constants/theme';
+import { AI_URL } from '../../constants/config';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 

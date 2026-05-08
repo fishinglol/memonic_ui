@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import { BleManager, Device } from 'react-native-ble-plx';
 import * as FileSystem from 'expo-file-system/legacy';
 import { toByteArray, fromByteArray } from 'base64-js';
-import { API_URL, AI_URL } from '../app/config';
+import { API_URL, AI_URL } from '../constants/config';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
 const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
@@ -19,34 +20,85 @@ export const useMemonicBLE = () => {
     const audioBufferRef = useRef<number[]>([]);
     const reconnectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+    const requestPermissions = async () => {
+        if (Platform.OS === 'android') {
+            if (Platform.Version >= 31) {
+                const granted = await PermissionsAndroid.requestMultiple([
+                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+                ]);
+                return (
+                    granted['android.permission.BLUETOOTH_SCAN'] === PermissionsAndroid.RESULTS.GRANTED &&
+                    granted['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED &&
+                    granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
+                );
+            } else {
+                const granted = await PermissionsAndroid.request(
+                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+                );
+                return granted === PermissionsAndroid.RESULTS.GRANTED;
+            }
+        }
+        return true;
+    };
+
     useEffect(() => {
         if (Platform.OS === 'web') {
             console.log('Bluetooth is not supported on web. Mocking BLE connection.');
             return;
         }
 
-        managerRef.current = new BleManager();
-        scanAndConnect();
+        const initBLE = async () => {
+            const hasPermission = await requestPermissions();
+            if (!hasPermission) {
+                console.warn('Permissions not granted for Bluetooth.');
+                return;
+            }
+
+            const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+            if (isExpoGo) {
+                console.warn("Running in Expo Go: Bluetooth (BLE) is disabled. Use a Development Build to test Bluetooth.");
+                return;
+            }
+
+            try {
+                if (!managerRef.current) {
+                    managerRef.current = new BleManager();
+                }
+                scanAndConnect();
+            } catch (e) {
+                console.error("BLE Initialization failed", e);
+            }
+        };
+
+        initBLE();
 
         return () => {
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
             if (deviceRef.current) {
                 managerRef.current?.cancelDeviceConnection(deviceRef.current.id).catch(() => {});
             }
-            managerRef.current?.destroy();
+            // Note: Keep manager alive for faster re-scans, or destroy on unmount
+            // managerRef.current?.destroy(); 
         };
     }, []);
 
     const scanAndConnect = () => {
         if (!managerRef.current) return;
-        managerRef.current.startDeviceScan(null, null, (error, device) => {
+        
+        console.log('Searching for Memonic bracelet (UUID: ' + SERVICE_UUID + ')...');
+        
+        // Use UUID filter for more reliable discovery
+        managerRef.current.startDeviceScan([SERVICE_UUID], null, (error, device) => {
             if (error) {
                 console.error('Scan error:', error);
                 scheduleReconnect();
                 return;
             }
 
-            if (device?.name === 'Memonic' || device?.localName === 'Memonic') {
+            if (device) {
+                console.log('Found Memonic device:', device.name || device.id);
                 managerRef.current?.stopDeviceScan();
                 connectToDevice(device);
             }
@@ -59,6 +111,13 @@ export const useMemonicBLE = () => {
             await connectedDevice.discoverAllServicesAndCharacteristics();
             deviceRef.current = connectedDevice;
             setIsConnected(true);
+            
+            // Notify backend about connection
+            fetch(`${AI_URL}/update`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ bracelet: "Connected", dock: "Connected" })
+            }).catch(err => console.error("Heartbeat update failed", err));
 
             managerRef.current?.onDeviceDisconnected(device.id, (error, dev) => {
                 setIsConnected(false);

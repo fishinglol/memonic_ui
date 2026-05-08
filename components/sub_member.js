@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as FileSystem from 'expo-file-system/legacy';
-import { AI_URL } from '../app/config';
+import { AI_URL } from '../constants/config';
 
 let Audio = null;
 try { Audio = require('expo-av').Audio; } catch (e) {

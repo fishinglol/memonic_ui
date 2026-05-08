@@ -5,8 +5,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState, useEffect, useRef } from 'react';
-import { API_URL } from '../config';
-import { COLORS, SHADOWS } from '../theme';
+import { API_URL } from '../../constants/config';
+import { COLORS, SHADOWS } from '../../constants/theme';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 

@@ -3,8 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AddMemberSheet from '../components/sub_member';
-import { AI_URL } from './config';
-import { COLORS, SHADOWS } from './theme';
+import { AI_URL } from '../constants/config';
+import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function Member() {
     const router = useRouter();

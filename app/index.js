@@ -4,8 +4,8 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from './config';
-import { COLORS, SHADOWS } from './theme';
+import { API_URL } from '../constants/config';
+import { COLORS, SHADOWS } from '../constants/theme';
 import { useMemonicBLE } from '../hooks/useMemonicBLE';
 
 export default function Index() {

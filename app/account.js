@@ -7,8 +7,8 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useState, useEffect } from 'react';
 import AddMemberSheet from '../components/sub_member';
-import { API_URL, AI_URL } from './config';
-import { COLORS, SHADOWS } from './theme';
+import { API_URL, AI_URL } from '../constants/config';
+import { COLORS, SHADOWS } from '../constants/theme';
 
 export default function AccountScreen() {
   const router = useRouter();
