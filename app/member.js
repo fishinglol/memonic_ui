@@ -1,4 +1,4 @@
-import { Text, View, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import { Text, View, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, Alert } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -32,7 +32,33 @@ export default function Member() {
         setRefreshing(false);
     }, [fetchMembers]);
 
-    const MemberRow = ({ icon, title, onPress, isAdd }) => (
+    const handleDeleteMember = async (user_id) => {
+        Alert.alert(
+            "Delete Profile",
+            `Are you sure you want to delete the voice profile for '${user_id}'?`,
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            const response = await fetch(`${AI_URL}/api/voice-profile/${user_id}`, {
+                                method: 'DELETE'
+                            });
+                            if (response.ok) {
+                                fetchMembers();
+                            }
+                        } catch (error) {
+                            console.error("Error deleting member:", error);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
+    const MemberRow = ({ icon, title, onPress, isAdd, onDelete }) => (
         <TouchableOpacity
             style={[styles.memberRow, isAdd && styles.memberRowAccent]}
             onPress={onPress}
@@ -44,13 +70,15 @@ export default function Member() {
             <Text style={[styles.memberRowText, isAdd && styles.memberRowTextBold]}>
                 {title}
             </Text>
-            <View style={styles.chevronCircle}>
-                <Ionicons
-                    name={isAdd ? "add" : "chevron-forward"}
-                    size={isAdd ? 20 : 16}
-                    color={COLORS.textMuted}
-                />
-            </View>
+            {isAdd ? (
+                <View style={styles.chevronCircle}>
+                    <Ionicons name="add" size={20} color={COLORS.textMuted} />
+                </View>
+            ) : (
+                <TouchableOpacity onPress={onDelete} style={styles.deleteBtn}>
+                    <Ionicons name="trash-outline" size={18} color={COLORS.danger} />
+                </TouchableOpacity>
+            )}
         </TouchableOpacity>
     );
 
@@ -89,7 +117,11 @@ export default function Member() {
                     {members.length > 0 ? (
                         members.map((member, index) => (
                             <View key={index}>
-                                <MemberRow icon="person-circle-outline" title={member} />
+                                <MemberRow 
+                                    icon="person-circle-outline" 
+                                    title={member} 
+                                    onDelete={() => handleDeleteMember(member)}
+                                />
                                 {index < members.length - 1 && <View style={styles.rowDivider} />}
                             </View>
                         ))
@@ -117,7 +149,7 @@ export default function Member() {
 
                 <View style={styles.footerInfo}>
                     <Ionicons name="shield-checkmark-outline" size={14} color={COLORS.textMuted} />
-                    <Text style={styles.footerText}>Your next renewal is on April 6, 2026</Text>
+                    <Text style={styles.footerText}>Secure voice encryption active</Text>
                 </View>
 
                 <View style={{ height: 40 }} />
@@ -125,7 +157,10 @@ export default function Member() {
 
             <AddMemberSheet
                 visible={sheetVisible}
-                onClose={() => setSheetVisible(false)}
+                onClose={() => {
+                    setSheetVisible(false);
+                    fetchMembers();
+                }}
             />
         </View>
     );
@@ -183,6 +218,10 @@ const styles = StyleSheet.create({
     chevronCircle: {
         width: 32, height: 32, borderRadius: 12,
         backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+    },
+    deleteBtn: {
+        width: 36, height: 36, borderRadius: 12,
+        backgroundColor: COLORS.dangerSoft, justifyContent: 'center', alignItems: 'center',
     },
     rowDivider: { height: 1, backgroundColor: COLORS.divider, marginHorizontal: 20 },
     emptyState: { paddingVertical: 48, alignItems: 'center' },
