@@ -8,17 +8,19 @@ import { AI_URL } from '../constants/config';
 
 const BLEContext = createContext();
 
-const SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+const SERVICE_UUID        = "12345678-1234-1234-1234-123456789abc";
 const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
 
 export const BLEProvider = ({ children }) => {
-    const [isConnected, setIsConnected] = useState(false);
-    const [lastMemory, setLastMemory] = useState(null);
+    const [isConnected, setIsConnected]   = useState(false);
+    const [isReceiving, setIsReceiving]   = useState(false); 
+    const [lastMemory,  setLastMemory]    = useState(null);
 
-    const managerRef = useRef(null);
-    const deviceRef = useRef(null);
+    const managerRef        = useRef(null);
+    const deviceRef         = useRef(null);
     const reconnectTimerRef = useRef(null);
 
+    // ── Permissions ───────────────────────────────────────────
     const requestPermissions = async () => {
         if (Platform.OS === 'android') {
             if (Platform.Version >= 31) {
@@ -28,7 +30,7 @@ export const BLEProvider = ({ children }) => {
                     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
                 ]);
                 return (
-                    granted['android.permission.BLUETOOTH_SCAN'] === PermissionsAndroid.RESULTS.GRANTED &&
+                    granted['android.permission.BLUETOOTH_SCAN']   === PermissionsAndroid.RESULTS.GRANTED &&
                     granted['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED &&
                     granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
                 );
@@ -42,6 +44,7 @@ export const BLEProvider = ({ children }) => {
         return true;
     };
 
+    // ── Init ──────────────────────────────────────────────────
     useEffect(() => {
         if (Platform.OS === 'web') return;
 
@@ -64,15 +67,16 @@ export const BLEProvider = ({ children }) => {
 
         initBLE();
 
+        // Heartbeat to backend via WiFi (to keep Cloud status Connected)
         const heartbeatInterval = setInterval(async () => {
             if (deviceRef.current && isConnected) {
-                const cmd = 'HEARTBEAT';
-                const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
                 try {
-                    await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
-                } catch (e) {
-                    // Ignore heartbeat failure
-                }
+                    await fetch(`${AI_URL}/update`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ bracelet: "Connected", dock: "Connected" })
+                    });
+                } catch (e) {}
             }
         }, 10000);
 
@@ -85,9 +89,9 @@ export const BLEProvider = ({ children }) => {
         };
     }, []);
 
+    // ── Scan & Connect ────────────────────────────────────────
     const scanAndConnect = () => {
         if (!managerRef.current) return;
-        // Scan for all devices and filter by name for better reliability
         managerRef.current.startDeviceScan(null, null, (error, device) => {
             if (error) {
                 console.warn("Scan error:", error);
@@ -109,15 +113,18 @@ export const BLEProvider = ({ children }) => {
             await connectedDevice.discoverAllServicesAndCharacteristics();
             deviceRef.current = connectedDevice;
             setIsConnected(true);
+            setIsReceiving(false);
 
             managerRef.current?.onDeviceDisconnected(device.id, () => {
                 setIsConnected(false);
+                setIsReceiving(false);
                 deviceRef.current = null;
                 scheduleReconnect();
             });
 
             setupNotifications(connectedDevice);
         } catch (e) {
+            console.warn("Connection failed:", e);
             scheduleReconnect();
         }
     };
@@ -129,81 +136,97 @@ export const BLEProvider = ({ children }) => {
         }, 5000);
     };
 
+    // ── Notifications ─────────────────────────────────────────
     const setupNotifications = (device) => {
         device.monitorCharacteristicForService(
             SERVICE_UUID,
             CHARACTERISTIC_UUID,
             (error, characteristic) => {
-                if (!error && characteristic?.value) {
-                    const decoded = toByteArray(characteristic.value);
-                    const textStr = String.fromCharCode.apply(null, Array.from(decoded));
-                    
-                    // Display status messages from ESP32 (e.g., "OK: Enrolled", "ERROR: Upload Failed")
-                    if (textStr.includes(':')) {
-                        setLastMemory(textStr);
-                    }
+                if (error) {
+                    console.warn("Notification error:", error);
+                    return;
+                }
+                if (!characteristic?.value) return;
+
+                const decoded = toByteArray(characteristic.value);
+                const msg     = String.fromCharCode.apply(null, Array.from(decoded));
+                console.log("📨 ESP32 →", msg);
+
+                setLastMemory(msg);
+
+                // หากได้รับผลลัพธ์ (SUCCESS หรือ ERROR) ให้จบสถานะ Receiving
+                const isDone = msg.startsWith("SUCCESS") || msg.startsWith("ERROR");
+                if (isDone) {
+                    setIsReceiving(false);
                 }
             }
         );
     };
 
+    // ── Commands ──────────────────────────────────────────────
+    const writeBLE = async (cmd) => {
+        if (!deviceRef.current) {
+            console.warn("writeBLE: no device connected");
+            return false;
+        }
+        const base64Cmd = fromByteArray(
+            new Uint8Array(cmd.split('').map(c => c.charCodeAt(0)))
+        );
+        try {
+            await deviceRef.current.writeCharacteristicWithResponseForService(
+                SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd
+            );
+            return true;
+        } catch (e) {
+            console.error(`writeBLE "${cmd}" failed:`, e);
+            return false;
+        }
+    };
+
     const sendEnrollCommand = async (name) => {
-        if (!deviceRef.current) return;
-        setLastMemory("Triggering enrollment...");
-        const cmd = `ENROLL ${name}`;
-        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
-        try {
-            await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
-        } catch (error) {
-            console.error('Failed to send enroll command:', error);
-        }
-    };
-
-    const sendResetCommand = async () => {
-        if (!deviceRef.current) return;
-        const cmd = `RESET`;
-        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
-        try {
-            await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
-        } catch (error) {
-            console.error('Failed to send reset command:', error);
-        }
-    };
-
-    const setAutoRecordEnabled = async (enabled) => {
-        if (!deviceRef.current || !isConnected) return;
-        const cmd = enabled ? 'ENABLE_AUTO' : 'DISABLE_AUTO';
-        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
-        try {
-            await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
-        } catch (error) {
-            console.warn('Failed to toggle auto-record:', error);
-        }
+        setLastMemory(null);
+        setIsReceiving(true);
+        const ok = await writeBLE(`ENROLL ${name}`);
+        if (!ok) setIsReceiving(false);
     };
 
     const startMemoryRecording = async () => {
-        if (!deviceRef.current || !isConnected) return;
-        setLastMemory("Starting recording...");
-        const cmd = 'START';
-        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
-        try {
-            await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
-        } catch (error) {
-            console.error('Failed to start memory recording:', error);
-        }
+        setLastMemory(null);
+        setIsReceiving(true);
+        const ok = await writeBLE('START');
+        if (!ok) setIsReceiving(false);
+    };
+
+    const sendResetCommand = async () => {
+        setIsReceiving(false);
+        await writeBLE('RESET');
+    };
+
+    const setAutoRecordEnabled = async (enabled) => {
+        await writeBLE(enabled ? 'ENABLE_AUTO' : 'DISABLE_AUTO');
     };
 
     const reconnect = () => {
-        if (managerRef.current) {
-            managerRef.current.stopDeviceScan();
-            setIsConnected(false);
-            deviceRef.current = null;
-            scanAndConnect();
-        }
+        if (!managerRef.current) return;
+        managerRef.current.stopDeviceScan();
+        setIsConnected(false);
+        setIsReceiving(false);
+        deviceRef.current = null;
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        scanAndConnect();
     };
 
     return (
-        <BLEContext.Provider value={{ isConnected, isReceiving: false, lastMemory, sendEnrollCommand, sendResetCommand, setAutoRecordEnabled, startMemoryRecording, reconnect }}>
+        <BLEContext.Provider value={{
+            isConnected,
+            isReceiving,
+            lastMemory,
+            sendEnrollCommand,
+            sendResetCommand,
+            setAutoRecordEnabled,
+            startMemoryRecording,
+            reconnect,
+        }}>
             {children}
         </BLEContext.Provider>
     );
