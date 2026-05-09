@@ -214,6 +214,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                                 <Ionicons name="close" size={18} color={C.textMuted} />
                             </TouchableOpacity>
                         </View>
+                    </View>
 
                     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
                         {/* Name */}
