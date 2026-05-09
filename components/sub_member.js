@@ -18,7 +18,7 @@ const C = {
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT  = SCREEN_HEIGHT * 0.82;
-const RECORD_SECONDS = 3; 
+const RECORD_SECONDS = 2; 
 
 import { useMemonicBLE } from '../hooks/useMemonicBLE';
 
