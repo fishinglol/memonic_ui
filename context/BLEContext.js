@@ -68,7 +68,20 @@ export const BLEProvider = ({ children }) => {
 
         initBLE();
 
+        const heartbeatInterval = setInterval(async () => {
+            if (deviceRef.current && isConnected) {
+                const cmd = 'HEARTBEAT';
+                const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
+                try {
+                    await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
+                } catch (e) {
+                    // Ignore heartbeat failure
+                }
+            }
+        }, 10000);
+
         return () => {
+            clearInterval(heartbeatInterval);
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
             if (deviceRef.current) {
                 managerRef.current?.cancelDeviceConnection(deviceRef.current.id).catch(() => {});
@@ -245,6 +258,7 @@ export const BLEProvider = ({ children }) => {
 
     const sendEnrollCommand = async (name) => {
         if (!deviceRef.current) return;
+        setLastMemory(null); // Clear previous status
         const cmd = `ENROLL ${name}`;
         const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
         try {
@@ -269,18 +283,40 @@ export const BLEProvider = ({ children }) => {
     };
 
     const setAutoRecordEnabled = async (enabled) => {
-        if (!deviceRef.current) return;
+        if (!deviceRef.current || !isConnected) return;
         const cmd = enabled ? 'ENABLE_AUTO' : 'DISABLE_AUTO';
         const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
         try {
             await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
         } catch (error) {
-            console.error('Failed to toggle auto-record:', error);
+            console.warn('Failed to toggle auto-record:', error);
+        }
+    };
+
+    const startMemoryRecording = async () => {
+        if (!deviceRef.current || !isConnected) return;
+        setLastMemory(null);
+        const cmd = 'START';
+        const base64Cmd = fromByteArray(new Uint8Array(cmd.split('').map(c => c.charCodeAt(0))));
+        try {
+            await deviceRef.current.writeCharacteristicWithResponseForService(SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd);
+        } catch (error) {
+            console.error('Failed to start memory recording:', error);
+        }
+    };
+
+    const reconnect = () => {
+        if (managerRef.current) {
+            managerRef.current.stopDeviceScan();
+            setIsConnected(false);
+            setIsReceiving(false);
+            deviceRef.current = null;
+            scanAndConnect();
         }
     };
 
     return (
-        <BLEContext.Provider value={{ isConnected, isReceiving, lastMemory, sendEnrollCommand, sendResetCommand, setAutoRecordEnabled }}>
+        <BLEContext.Provider value={{ isConnected, isReceiving, lastMemory, sendEnrollCommand, sendResetCommand, setAutoRecordEnabled, startMemoryRecording, reconnect }}>
             {children}
         </BLEContext.Provider>
     );

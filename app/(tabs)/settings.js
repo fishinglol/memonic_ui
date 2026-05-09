@@ -9,8 +9,11 @@ import { AI_URL } from '../../constants/config';
 // Re-export theme values from the parent config
 // (we import from ../app/theme via a small bridge)
 
+import { useMemonicBLE } from '../../hooks/useMemonicBLE';
+
 export default function Settings() {
     const router = useRouter();
+    const { reconnect } = useMemonicBLE();
 
     // ── Live device status from ESP32 (via backend) ──
     const [bracelet, setBracelet] = useState('Checking…');
@@ -67,6 +70,11 @@ export default function Settings() {
                 <View style={styles.verticalDivider} />
                 <DeviceStatus icon="hardware-chip-outline" label="Dock (CPU)" value={dock} />
             </View>
+
+            <TouchableOpacity style={styles.reconnectButton} onPress={reconnect} activeOpacity={0.7}>
+                <Ionicons name="refresh-circle-outline" size={20} color={COLORS.accent} style={{ marginRight: 8 }} />
+                <Text style={styles.reconnectText}>Reconnect Bracelet</Text>
+            </TouchableOpacity>
 
             {/* Settings Group */}
             <View style={styles.settingsGroup}>
@@ -140,6 +148,13 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
     },
     rowDivider: { height: 1, backgroundColor: COLORS.divider, marginHorizontal: 20 },
+    reconnectButton: {
+        backgroundColor: COLORS.surface, height: 50, borderRadius: 16,
+        alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+        marginBottom: 28, ...SHADOWS.small,
+        borderWidth: 1, borderColor: COLORS.accentSoft,
+    },
+    reconnectText: { color: COLORS.accent, fontSize: 15, fontWeight: '600', fontFamily: 'Garamond-Bold' },
 
     // ── Log Out ──
     logoutButton: {

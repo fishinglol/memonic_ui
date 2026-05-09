@@ -59,6 +59,8 @@ export default function AddMemberSheet({ visible, onClose }) {
         }
     }, [visible, isConnected]);
 
+    const prevIsBLEReceiving = useRef(isBLEReceiving);
+
     // Handle BLE recording timeout/completion
     useEffect(() => {
         if (isBLEReceiving) {
@@ -66,17 +68,16 @@ export default function AddMemberSheet({ visible, onClose }) {
             setElapsed(0);
             if (timerRef.current) clearInterval(timerRef.current);
             timerRef.current = setInterval(() => {
-                setElapsed(prev => {
-                    const next = prev + 1;
-                    if (next >= 7) { // Bracelet records for 7s for enrollment
-                        clearInterval(timerRef.current);
-                    }
-                    return next;
-                });
+                setElapsed(prev => prev + 1);
             }, 1000);
-        } else if (elapsed >= 7) {
-            setRecordingDone(true);
+        } else {
+            // If it WAS receiving and now stopped, it's done
+            if (prevIsBLEReceiving.current) {
+                setRecordingDone(true);
+                if (timerRef.current) clearInterval(timerRef.current);
+            }
         }
+        prevIsBLEReceiving.current = isBLEReceiving;
     }, [isBLEReceiving]);
 
     useEffect(() => {
@@ -130,9 +131,6 @@ export default function AddMemberSheet({ visible, onClose }) {
                 Alert.alert('Missing name', 'Please enter a member name first.');
                 return;
             }
-            
-            // Always reset before enrollment to clear any state
-            await sendResetCommand();
             
             if (isBLEReceiving) {
                 return;
@@ -253,8 +251,8 @@ export default function AddMemberSheet({ visible, onClose }) {
                                 <View style={styles.voiceStatus}>
                                     {!isRecording && !recordingDone && (
                                         <View>
-                                            <Text style={styles.voicePromptTitle}>Tap the mic to start</Text>
-                                            <Text style={styles.voicePromptBody}>Read aloud:</Text>
+                                            <Text style={styles.voicePromptTitle}>Record Reference Voice</Text>
+                                            <Text style={styles.voicePromptBody}>AI needs this to remember you:</Text>
                                             <View style={styles.quoteCard}>
                                                 <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.accent} style={{ marginRight: 8, marginTop: 2 }} />
                                                 <Text style={styles.quoteText}>"Hi one two three, I am so happy to see you"</Text>
@@ -288,10 +286,18 @@ export default function AddMemberSheet({ visible, onClose }) {
                                     {recordingDone && (
                                         <View>
                                             <View style={styles.doneBadge}>
-                                                <Ionicons name="checkmark-circle" size={16} color={C.success} />
-                                                <Text style={styles.doneBadgeText}>Voice Recorded</Text>
+                                                <Ionicons 
+                                                    name={lastMemory?.includes("SUCCESS") ? "checkmark-circle" : "sync-outline"} 
+                                                    size={16} 
+                                                    color={lastMemory?.includes("SUCCESS") ? C.success : C.accent} 
+                                                />
+                                                <Text style={[styles.doneBadgeText, !lastMemory?.includes("SUCCESS") && {color: C.accent}]}>
+                                                    {lastMemory?.includes("SUCCESS") ? "Voice Enrolled" : "Processing..."}
+                                                </Text>
                                             </View>
-                                            <Text style={styles.doneDetail}>Duration: {elapsed}s</Text>
+                                            <Text style={styles.doneDetail}>
+                                                {lastMemory?.includes("SUCCESS") ? `Profile for ${memberName} is ready` : "Sending to server..."}
+                                            </Text>
                                             <TouchableOpacity style={styles.reRecordBtn} onPress={handleMicPress}>
                                                 <Ionicons name="refresh" size={14} color={C.icon} />
                                                 <Text style={styles.reRecordText}>Re-record</Text>
@@ -317,12 +323,31 @@ export default function AddMemberSheet({ visible, onClose }) {
                             <Ionicons name="chevron-forward" size={18} color={C.textMuted} />
                         </TouchableOpacity>
 
-                        <TouchableOpacity style={[styles.addButton, enrolling && { opacity: 0.6 }]} onPress={handleAddMember} disabled={enrolling} activeOpacity={0.85}>
-                            <View style={styles.addButtonInner}>
-                                <Ionicons name={enrolling ? "sync" : "person-add"} size={18} color="#fff" style={{ marginRight: 8 }} />
-                                <Text style={styles.addButtonText}>{enrolling ? 'Enrolling...' : 'Add Member'}</Text>
-                            </View>
-                        </TouchableOpacity>
+                        {(() => {
+                            const isWaitingForBLE = isConnected && recordingDone && !lastMemory?.includes("SUCCESS");
+                            const isProcessing = enrolling || isWaitingForBLE;
+                            
+                            return (
+                                <TouchableOpacity 
+                                    style={[styles.addButton, isProcessing && { opacity: 0.6 }]} 
+                                    onPress={handleAddMember} 
+                                    disabled={isProcessing} 
+                                    activeOpacity={0.85}
+                                >
+                                    <View style={styles.addButtonInner}>
+                                        <Ionicons 
+                                            name={isProcessing ? "sync" : "person-add"} 
+                                            size={18} 
+                                            color="#fff" 
+                                            style={{ marginRight: 8 }} 
+                                        />
+                                        <Text style={styles.addButtonText}>
+                                            {enrolling ? 'Enrolling...' : (isWaitingForBLE ? 'Processing Voice...' : 'Add Member')}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+                            );
+                        })()}
                         <View style={{ height: 30 }} />
                     </ScrollView>
                 </Animated.View>
