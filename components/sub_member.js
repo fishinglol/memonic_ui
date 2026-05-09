@@ -126,19 +126,22 @@ export default function AddMemberSheet({ visible, onClose }) {
     };
 
     const handleMicPress = async () => {
-        if (isConnected) {
-            if (!memberName.trim()) {
-                Alert.alert('Missing name', 'Please enter a member name first.');
-                return;
-            }
-            
-            if (isBLEReceiving) {
-                return;
-            }
-            sendEnrollCommand(memberName.trim());
-        } else {
-            isLocalRecording ? stopLocalRecording() : startLocalRecording();
+        if (!isConnected) {
+            // If not connected, try to reconnect instead of just showing an alert
+            reconnect();
+            Alert.alert('Connecting...', 'Scanning for your Memonic bracelet. Please make sure it is turned on and nearby.');
+            return;
         }
+
+        if (!memberName.trim()) {
+            Alert.alert('Missing name', 'Please enter a member name first.');
+            return;
+        }
+        
+        if (isBLEReceiving) {
+            return;
+        }
+        sendEnrollCommand(memberName.trim());
     };
 
     const handleAddMember = async () => {
@@ -200,10 +203,17 @@ export default function AddMemberSheet({ visible, onClose }) {
                                 <Text style={styles.sheetSubtitle}>Enroll a new voice profile</Text>
                             </View>
                         </View>
-                        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-                            <Ionicons name="close" size={18} color={C.textMuted} />
-                        </TouchableOpacity>
-                    </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={[styles.connBadge, { backgroundColor: isConnected ? C.successSoft : C.dangerSoft }]}>
+                                <View style={[styles.connDot, { backgroundColor: isConnected ? C.success : C.danger }]} />
+                                <Text style={[styles.connText, { color: isConnected ? C.success : C.danger }]}>
+                                    {isConnected ? 'Connected' : 'Disconnected'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+                                <Ionicons name="close" size={18} color={C.textMuted} />
+                            </TouchableOpacity>
+                        </View>
 
                     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
                         {/* Name */}
@@ -366,6 +376,9 @@ const styles = StyleSheet.create({
     },
     handleBar: { width: 36, height: 4, borderRadius: 2, backgroundColor: C.surfaceDeep, alignSelf: 'center', marginTop: 10, marginBottom: 18 },
     sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+    connBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginRight: 10 },
+    connDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+    connText: { fontSize: 12, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
     headerLeft: { flexDirection: 'row', alignItems: 'center' },
     headerIconWrap: {
         width: 40, height: 40, borderRadius: 14, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center', marginRight: 14,

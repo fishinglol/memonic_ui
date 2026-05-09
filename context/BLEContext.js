@@ -87,12 +87,15 @@ export const BLEProvider = ({ children }) => {
 
     const scanAndConnect = () => {
         if (!managerRef.current) return;
-        managerRef.current.startDeviceScan([SERVICE_UUID], null, (error, device) => {
+        // Scan for all devices and filter by name for better reliability
+        managerRef.current.startDeviceScan(null, null, (error, device) => {
             if (error) {
+                console.warn("Scan error:", error);
                 scheduleReconnect();
                 return;
             }
-            if (device) {
+            if (device && (device.name === 'Memonic' || device.localName === 'Memonic')) {
+                console.log("📍 Found Memonic via BLE!");
                 managerRef.current?.stopDeviceScan();
                 connectToDevice(device);
             }
