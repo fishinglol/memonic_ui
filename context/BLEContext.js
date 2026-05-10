@@ -1,226 +1,148 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
-import { Platform, PermissionsAndroid } from 'react-native';
-import { BleManager } from 'react-native-ble-plx';
-import { fromByteArray, toByteArray } from 'base64-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants, { ExecutionEnvironment } from 'expo-constants';
+// BLEContext.js — name kept for compatibility, but BLE has been removed.
+// Bracelet is now controlled entirely through the backend over WiFi/HTTPS.
+// The hook surface (isConnected, sendEnrollCommand, lastMemory, ...) is
+// preserved so callers (sub_member, index, useMemonicBLE) keep working.
+
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { AI_URL } from '../constants/config';
 
-const BLEContext = createContext();
+const BraceletContext = createContext();
 
-const SERVICE_UUID        = "12345678-1234-1234-1234-123456789abc";
-const CHARACTERISTIC_UUID = "abcd1234-ab12-ab12-ab12-abcdef123456";
+const POLL_MS_IDLE   = 5000;  // polling when nothing happening
+const POLL_MS_ACTIVE = 800;   // polling during an enroll/record job
+const COMMAND_TIMEOUT_MS = 30000;
 
 export const BLEProvider = ({ children }) => {
-    const [isConnected, setIsConnected]   = useState(false);
-    const [isReceiving, setIsReceiving]   = useState(false); 
-    const [lastMemory,  setLastMemory]    = useState(null);
+    const [isConnected,     setIsConnected]     = useState(false);
+    const [isReceiving,     setIsReceiving]     = useState(false);
+    const [lastMemory,      setLastMemory]      = useState(null);
+    const [operationStatus, setOperationStatus] = useState('idle'); // idle|recording|processing|success|error
 
-    const managerRef        = useRef(null);
-    const deviceRef         = useRef(null);
-    const reconnectTimerRef = useRef(null);
+    const pollTimerRef    = useRef(null);
+    const commandStartRef = useRef(0);
 
-    // ── Permissions ───────────────────────────────────────────
-    const requestPermissions = async () => {
-        if (Platform.OS === 'android') {
-            if (Platform.Version >= 31) {
-                const granted = await PermissionsAndroid.requestMultiple([
-                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-                    PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-                ]);
-                return (
-                    granted['android.permission.BLUETOOTH_SCAN']   === PermissionsAndroid.RESULTS.GRANTED &&
-                    granted['android.permission.BLUETOOTH_CONNECT'] === PermissionsAndroid.RESULTS.GRANTED &&
-                    granted['android.permission.ACCESS_FINE_LOCATION'] === PermissionsAndroid.RESULTS.GRANTED
-                );
-            } else {
-                const granted = await PermissionsAndroid.request(
-                    PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
-                );
-                return granted === PermissionsAndroid.RESULTS.GRANTED;
-            }
-        }
-        return true;
-    };
-
-    // ── Init ──────────────────────────────────────────────────
-    useEffect(() => {
-        if (Platform.OS === 'web') return;
-
-        const initBLE = async () => {
-            const hasPermission = await requestPermissions();
-            if (!hasPermission) return;
-
-            const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
-            if (isExpoGo) return;
-
-            try {
-                if (!managerRef.current) {
-                    managerRef.current = new BleManager();
-                }
-                scanAndConnect();
-            } catch (e) {
-                console.error("BLE Initialization failed", e);
-            }
-        };
-
-        initBLE();
-
-        // Heartbeat to backend via WiFi (to keep Cloud status Connected)
-        const heartbeatInterval = setInterval(async () => {
-            if (deviceRef.current && isConnected) {
-                try {
-                    await fetch(`${AI_URL}/update`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ bracelet: "Connected", dock: "Connected" })
-                    });
-                } catch (e) {}
-            }
-        }, 10000);
-
-        return () => {
-            clearInterval(heartbeatInterval);
-            if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-            if (deviceRef.current) {
-                managerRef.current?.cancelDeviceConnection(deviceRef.current.id).catch(() => {});
-            }
-        };
-    }, []);
-
-    // ── Scan & Connect ────────────────────────────────────────
-    const scanAndConnect = () => {
-        if (!managerRef.current) return;
-        managerRef.current.startDeviceScan(null, null, (error, device) => {
-            if (error) {
-                console.warn("Scan error:", error);
-                scheduleReconnect();
-                return;
-            }
-            if (device && (device.name === 'Memonic' || device.localName === 'Memonic')) {
-                console.log("📍 Found Memonic via BLE!");
-                managerRef.current?.stopDeviceScan();
-                connectToDevice(device);
-            }
-        });
-    };
-
-    const connectToDevice = async (device) => {
+    // ── Status polling ───────────────────────────────────────
+    const pollOnce = useCallback(async () => {
         try {
-            const connectedDevice = await device.connect();
-            await connectedDevice.requestMTU(512);
-            await connectedDevice.discoverAllServicesAndCharacteristics();
-            deviceRef.current = connectedDevice;
-            setIsConnected(true);
-            setIsReceiving(false);
+            const r = await fetch(`${AI_URL}/api/bracelet/status`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
 
-            managerRef.current?.onDeviceDisconnected(device.id, () => {
-                setIsConnected(false);
-                setIsReceiving(false);
-                deviceRef.current = null;
-                scheduleReconnect();
-            });
+            setIsConnected(!!data.online);
 
-            setupNotifications(connectedDevice);
-        } catch (e) {
-            console.warn("Connection failed:", e);
-            scheduleReconnect();
-        }
-    };
+            const job = data.job || {};
+            const state = job.state || 'idle';
 
-    const scheduleReconnect = () => {
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        reconnectTimerRef.current = setTimeout(() => {
-            scanAndConnect();
-        }, 5000);
-    };
-
-    // ── Notifications ─────────────────────────────────────────
-    const setupNotifications = (device) => {
-        device.monitorCharacteristicForService(
-            SERVICE_UUID,
-            CHARACTERISTIC_UUID,
-            (error, characteristic) => {
-                if (error) {
-                    console.warn("Notification error:", error);
-                    return;
-                }
-                if (!characteristic?.value) return;
-
-                const decoded = toByteArray(characteristic.value);
-                const msg     = String.fromCharCode.apply(null, Array.from(decoded));
-                console.log("📨 ESP32 →", msg);
-
-                setLastMemory(msg);
-
-                // หากได้รับผลลัพธ์ (SUCCESS หรือ ERROR) ให้จบสถานะ Receiving
-                const isDone = msg.startsWith("SUCCESS") || msg.startsWith("ERROR");
-                if (isDone) {
+            if (state === 'recording' || state === 'processing') {
+                setIsReceiving(true);
+                setOperationStatus(state);
+                // Auto-fail on stuck command
+                if (commandStartRef.current && Date.now() - commandStartRef.current > COMMAND_TIMEOUT_MS) {
                     setIsReceiving(false);
+                    setOperationStatus('error');
+                    setLastMemory('ERROR_TIMEOUT');
+                    commandStartRef.current = 0;
+                }
+            } else if (state === 'success') {
+                setIsReceiving(false);
+                setOperationStatus('success');
+                if (job.result) setLastMemory(job.result);
+                commandStartRef.current = 0;
+            } else if (state === 'error') {
+                setIsReceiving(false);
+                setOperationStatus('error');
+                if (job.result) setLastMemory(job.result);
+                commandStartRef.current = 0;
+            } else {
+                // idle — leave lastMemory as-is so UI can still show last result
+                setIsReceiving(false);
+                if (operationStatus !== 'success' && operationStatus !== 'error') {
+                    setOperationStatus('idle');
                 }
             }
-        );
-    };
-
-    // ── Commands ──────────────────────────────────────────────
-    const writeBLE = async (cmd) => {
-        if (!deviceRef.current) {
-            console.warn("writeBLE: no device connected");
-            return false;
-        }
-        const base64Cmd = fromByteArray(
-            new Uint8Array(cmd.split('').map(c => c.charCodeAt(0)))
-        );
-        try {
-            await deviceRef.current.writeCharacteristicWithResponseForService(
-                SERVICE_UUID, CHARACTERISTIC_UUID, base64Cmd
-            );
-            return true;
         } catch (e) {
-            console.error(`writeBLE "${cmd}" failed:`, e);
-            return false;
+            setIsConnected(false);
         }
-    };
+    }, [operationStatus]);
 
+    useEffect(() => {
+        pollOnce();
+        const tick = () => {
+            pollOnce();
+            const interval = isReceiving ? POLL_MS_ACTIVE : POLL_MS_IDLE;
+            pollTimerRef.current = setTimeout(tick, interval);
+        };
+        pollTimerRef.current = setTimeout(tick, isReceiving ? POLL_MS_ACTIVE : POLL_MS_IDLE);
+        return () => { if (pollTimerRef.current) clearTimeout(pollTimerRef.current); };
+    }, [isReceiving, pollOnce]);
+
+    // ── Commands (HTTP) ──────────────────────────────────────
     const sendEnrollCommand = async (name) => {
         setLastMemory(null);
+        setOperationStatus('recording');
         setIsReceiving(true);
-        const ok = await writeBLE(`ENROLL ${name}`);
-        if (!ok) setIsReceiving(false);
+        commandStartRef.current = Date.now();
+        try {
+            const r = await fetch(`${AI_URL}/api/bracelet/enroll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }),
+            });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            // Bracelet is now recording → next polls will pick up status
+            return true;
+        } catch (e) {
+            setOperationStatus('error');
+            setIsReceiving(false);
+            setLastMemory(`ERROR: ${e.message}`);
+            commandStartRef.current = 0;
+            return false;
+        }
     };
 
     const startMemoryRecording = async () => {
         setLastMemory(null);
+        setOperationStatus('recording');
         setIsReceiving(true);
-        const ok = await writeBLE('START');
-        if (!ok) setIsReceiving(false);
+        commandStartRef.current = Date.now();
+        try {
+            const r = await fetch(`${AI_URL}/api/bracelet/record`, { method: 'POST' });
+            if (!r.ok) {
+                const err = await r.json().catch(() => ({}));
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return true;
+        } catch (e) {
+            setOperationStatus('error');
+            setIsReceiving(false);
+            setLastMemory(`ERROR: ${e.message}`);
+            commandStartRef.current = 0;
+            return false;
+        }
     };
 
     const sendResetCommand = async () => {
+        commandStartRef.current = 0;
+        setOperationStatus('idle');
         setIsReceiving(false);
-        await writeBLE('RESET');
+        try {
+            await fetch(`${AI_URL}/api/bracelet/reset`, { method: 'POST' });
+        } catch (e) { /* ignore */ }
     };
 
-    const setAutoRecordEnabled = async (enabled) => {
-        await writeBLE(enabled ? 'ENABLE_AUTO' : 'DISABLE_AUTO');
-    };
-
-    const reconnect = () => {
-        if (!managerRef.current) return;
-        managerRef.current.stopDeviceScan();
-        setIsConnected(false);
-        setIsReceiving(false);
-        deviceRef.current = null;
-        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-        scanAndConnect();
-    };
+    // No-ops kept for compatibility with old call sites
+    const setAutoRecordEnabled = async (_enabled) => {};
+    const reconnect            = () => { pollOnce(); };
 
     return (
-        <BLEContext.Provider value={{
+        <BraceletContext.Provider value={{
             isConnected,
             isReceiving,
             lastMemory,
+            operationStatus,
             sendEnrollCommand,
             sendResetCommand,
             setAutoRecordEnabled,
@@ -228,8 +150,8 @@ export const BLEProvider = ({ children }) => {
             reconnect,
         }}>
             {children}
-        </BLEContext.Provider>
+        </BraceletContext.Provider>
     );
 };
 
-export const useBLE = () => useContext(BLEContext);
+export const useBLE = () => useContext(BraceletContext);

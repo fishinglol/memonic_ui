@@ -17,12 +17,13 @@ const C = {
 };
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const SHEET_HEIGHT  = SCREEN_HEIGHT * 0.82;
-const RECORD_SECONDS = 5; 
+const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
+const RECORD_SECONDS = 3; // ตรงกับ ESP32 ENROLL_RECORD_SECONDS
 
 import { useMemonicBLE } from '../hooks/useMemonicBLE';
 
 export default function AddMemberSheet({ visible, onClose }) {
+    // ✅ Fix #1: เพิ่ม reconnect เข้า destructure
     const {
         isConnected,
         isReceiving: isBLEReceiving,
@@ -33,15 +34,15 @@ export default function AddMemberSheet({ visible, onClose }) {
         reconnect,
     } = useMemonicBLE();
 
-    const router    = useRouter();
+    const router = useRouter();
     const slideAnim = useRef(new Animated.Value(SHEET_HEIGHT)).current;
     const pulseAnim = useRef(new Animated.Value(1)).current;
-    const glowAnim  = useRef(new Animated.Value(0)).current;
+    const glowAnim = useRef(new Animated.Value(0)).current;
 
-    const [memberName,    setMemberName]    = useState('');
+    const [memberName, setMemberName] = useState('');
     const [recordingDone, setRecordingDone] = useState(false);
-    const [elapsed,       setElapsed]       = useState(0);
-    const [enrolling,     setEnrolling]     = useState(false);
+    const [elapsed, setElapsed] = useState(0);
+    const [enrolling, setEnrolling] = useState(false);
 
     const timerRef = useRef(null);
 
@@ -60,9 +61,11 @@ export default function AddMemberSheet({ visible, onClose }) {
     }, [visible, isConnected]);
 
     // ── Track BLE recording state ─────────────────────────────
+    // ✅ Fix #2: isBLEReceiving ตอนนี้เป็นค่าจริงจาก BLEContext แล้ว
     const prevReceiving = useRef(false);
     useEffect(() => {
         if (isBLEReceiving) {
+            // ESP32 เริ่มอัดแล้ว → เริ่มจับเวลา
             setRecordingDone(false);
             setElapsed(0);
             if (timerRef.current) clearInterval(timerRef.current);
@@ -70,6 +73,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                 setElapsed(prev => prev + 1);
             }, 1000);
         } else if (prevReceiving.current) {
+            // เพิ่งหยุดอัด → mark done
             setRecordingDone(true);
             if (timerRef.current) clearInterval(timerRef.current);
         }
@@ -81,7 +85,7 @@ export default function AddMemberSheet({ visible, onClose }) {
         if (!isBLEReceiving) return;
         const pulse = Animated.loop(Animated.sequence([
             Animated.timing(pulseAnim, { toValue: 1.25, duration: 700, useNativeDriver: true }),
-            Animated.timing(pulseAnim, { toValue: 1,    duration: 700, useNativeDriver: true }),
+            Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
         ]));
         const glow = Animated.loop(Animated.sequence([
             Animated.timing(glowAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
@@ -108,12 +112,13 @@ export default function AddMemberSheet({ visible, onClose }) {
             .start(() => onClose());
     };
 
+    // ── Mic button ────────────────────────────────────────────
     const handleMicPress = async () => {
         if (!isConnected) {
             reconnect();
             Alert.alert(
-                'Connecting...',
-                'Scanning for your Memonic bracelet. Please make sure it is turned on and nearby.'
+                'Bracelet Offline',
+                'Your Memonic bracelet is not connected to the server. Make sure it is powered on and on the same WiFi.'
             );
             return;
         }
@@ -123,12 +128,14 @@ export default function AddMemberSheet({ visible, onClose }) {
             return;
         }
 
-        if (isBLEReceiving) return; 
+        if (isBLEReceiving) return; // กำลังอัดอยู่ ไม่ต้องทำอะไร
 
+        // ส่งคำสั่งให้ ESP32 อัด 3s แล้วส่งไป backend
         resetState();
         sendEnrollCommand(memberName.trim());
     };
 
+    // ── Add Member button ─────────────────────────────────────
     const handleAddMember = async () => {
         if (!memberName.trim()) {
             Alert.alert('Missing name', 'Please enter a member name.');
@@ -145,6 +152,7 @@ export default function AddMemberSheet({ visible, onClose }) {
             return;
         }
 
+        // ✅ Fix #3: lastMemory ตอนนี้รับค่าจาก ESP32 ตรงๆ ไม่มี ':' filter
         if (lastMemory?.includes("SUCCESS")) {
             Alert.alert('Success! 🎉', `${memberName} has been enrolled.`);
             resetState();
@@ -154,17 +162,20 @@ export default function AddMemberSheet({ visible, onClose }) {
             Alert.alert('Failed', `Enrollment error: ${lastMemory}`);
             resetState();
         } else {
+            // ยังรอ response อยู่
             Alert.alert('Processing', 'Voice profile is still being processed. Please wait.');
         }
     };
 
+    // ── UI helpers ────────────────────────────────────────────
     const timerProgress = Math.min(elapsed / RECORD_SECONDS, 1);
-    const formatTime    = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-    const enrolledOK       = recordingDone && lastMemory?.includes("SUCCESS");
-    const isWaitingForBLE  = isConnected && recordingDone && !enrolledOK && !lastMemory?.startsWith("ERROR");
-    const isProcessing     = enrolling || isWaitingForBLE;
+    const enrolledOK = recordingDone && lastMemory?.includes("SUCCESS");
+    const isWaitingForBLE = isConnected && recordingDone && !enrolledOK && !lastMemory?.startsWith("ERROR");
+    const isProcessing = enrolling || isWaitingForBLE;
 
+    // ── Render ────────────────────────────────────────────────
     return (
         <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
             <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -172,6 +183,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                 <Animated.View style={[styles.bottomSheet, { transform: [{ translateY: slideAnim }] }]}>
                     <View style={styles.handleBar} />
 
+                    {/* Header */}
                     <View style={styles.sheetHeader}>
                         <View style={styles.headerLeft}>
                             <View style={styles.headerIconWrap}>
@@ -197,6 +209,7 @@ export default function AddMemberSheet({ visible, onClose }) {
 
                     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
 
+                        {/* Name input */}
                         <View style={styles.sectionCard}>
                             <View style={styles.sectionHeader}>
                                 <Ionicons name="person-outline" size={16} color={C.icon} />
@@ -214,6 +227,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                             </View>
                         </View>
 
+                        {/* Voice enrollment */}
                         <View style={styles.sectionCard}>
                             <View style={styles.sectionHeader}>
                                 <Ionicons name="mic-outline" size={16} color={C.icon} />
@@ -221,6 +235,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                             </View>
 
                             <View style={styles.voiceContainer}>
+                                {/* Mic button */}
                                 <View style={styles.micArea}>
                                     {isBLEReceiving && (
                                         <Animated.View style={[styles.pulseRing, {
@@ -232,7 +247,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                                         style={[
                                             styles.voiceButton,
                                             isBLEReceiving && { backgroundColor: C.danger },
-                                            enrolledOK      && { backgroundColor: C.success },
+                                            enrolledOK && { backgroundColor: C.success },
                                             !isBLEReceiving && !enrolledOK && { backgroundColor: C.surfaceDeep },
                                         ]}
                                         onPress={handleMicPress}
@@ -247,7 +262,10 @@ export default function AddMemberSheet({ visible, onClose }) {
                                     </TouchableOpacity>
                                 </View>
 
+                                {/* Status area */}
                                 <View style={styles.voiceStatus}>
+
+                                    {/* Idle */}
                                     {!isBLEReceiving && !recordingDone && (
                                         <View>
                                             <Text style={styles.voicePromptTitle}>Record Reference Voice</Text>
@@ -259,6 +277,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                                         </View>
                                     )}
 
+                                    {/* Recording */}
                                     {isBLEReceiving && (
                                         <View>
                                             <View style={styles.recordingBadge}>
@@ -278,6 +297,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                                         </View>
                                     )}
 
+                                    {/* Done */}
                                     {recordingDone && !isBLEReceiving && (
                                         <View>
                                             <View style={styles.doneBadge}>
@@ -316,6 +336,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                             </View>
                         </View>
 
+                        {/* Add Member button */}
                         <TouchableOpacity
                             style={[styles.addButton, isProcessing && { opacity: 0.6 }]}
                             onPress={handleAddMember}

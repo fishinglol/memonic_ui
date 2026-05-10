@@ -7,12 +7,12 @@ export const useMemonicBLE = () => {
     const ble = useBLE();
     return {
         isConnected:          ble.isConnected,
-        isReceiving:          ble.isReceiving,
+        isReceiving:          ble.isReceiving,       // ✅ ค่าจริงจาก BLEContext
         lastMemory:           ble.lastMemory,
         sendEnrollCommand:    ble.sendEnrollCommand,
         sendResetCommand:     ble.sendResetCommand,
         setAutoRecordEnabled: ble.setAutoRecordEnabled,
         startMemoryRecording: ble.startMemoryRecording,
-        reconnect:            ble.reconnect,
+        reconnect:            ble.reconnect,         // ✅ ไม่ missing อีกต่อไป
     };
 };
