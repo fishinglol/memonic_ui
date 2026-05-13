@@ -1,10 +1,19 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator } from 'react-native';
+import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_URL } from '../constants/config';
+import { AI_URL } from '../constants/config';
 import { COLORS, SHADOWS } from '../constants/theme';
+
+function emotionColor(emotion) {
+    switch (emotion) {
+        case 'Happy':   return { color: '#34c759' };
+        case 'Sad':     return { color: '#5e9ef4' };
+        case 'Angry':   return { color: COLORS.danger };
+        default:        return { color: COLORS.textMuted };
+    }
+}
 
 export default function VoiceHistory() {
     const router = useRouter();
@@ -12,14 +21,13 @@ export default function VoiceHistory() {
     const [memories, setMemories] = useState([]);
     const [refreshing, setRefreshing] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [reRecordStatus, setReRecordStatus] = useState('idle'); // idle | recording | done | error
 
     const fetchMemories = async () => {
         try {
             const userId = await AsyncStorage.getItem('user_id');
-            let url = `${API_URL}/api/memories`;
-            if (userId) {
-                url += `?user_id=${userId}`;
-            }
+            let url = `${AI_URL}/api/memories?limit=50`;
+            if (userId) url += `&user_id=${userId}`;
             const response = await fetch(url);
             if (response.ok) {
                 const data = await response.json();
@@ -42,26 +50,53 @@ export default function VoiceHistory() {
         fetchMemories();
     }, []);
 
-    const renderItem = ({ item }) => (
-        <View style={styles.historyCard}>
-            <View style={styles.cardLeft}>
-                <View style={styles.avatarCircle}>
-                    <Ionicons name="mic" size={20} color={COLORS.icon} />
+    const handleReRecord = async () => {
+        if (reRecordStatus === 'recording') return;
+        setReRecordStatus('recording');
+        try {
+            const res = await fetch(`${AI_URL}/api/bracelet/record`, { method: 'POST' });
+            if (res.ok) {
+                setReRecordStatus('done');
+                setTimeout(() => {
+                    setReRecordStatus('idle');
+                    fetchMemories();
+                }, 6000);
+            } else {
+                setReRecordStatus('error');
+                setTimeout(() => setReRecordStatus('idle'), 3000);
+                Alert.alert('Re-record', 'Bracelet not connected or busy.');
+            }
+        } catch (e) {
+            setReRecordStatus('error');
+            setTimeout(() => setReRecordStatus('idle'), 3000);
+            Alert.alert('Re-record', 'Could not reach the Memonic server.');
+        }
+    };
+
+    const renderItem = ({ item }) => {
+        const time = item.timestamp
+            ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : '--:--';
+        const speaker = (item.speaker && item.speaker !== 'Unknown' && item.speaker !== 'unknown')
+            ? item.speaker : 'Unknown';
+        const emotion = item.emotion || 'Neutral';
+
+        return (
+            <View style={styles.historyCard}>
+                <View style={styles.rowTop}>
+                    <Text style={styles.timeText}>{time}</Text>
+                    <Text style={styles.speakerText}>{speaker}:</Text>
+                    <Text style={[styles.emotionBadge, emotionColor(emotion)]}>{emotion}</Text>
                 </View>
-                <View style={styles.cardInfo}>
-                    <Text style={styles.cardName} numberOfLines={2}>{item.transcript || 'No transcript'}</Text>
-                    <Text style={styles.cardDate}>
-                        {item.timestamp ? new Date(item.timestamp).toLocaleString() : 'Just now'} · {item.speaker || 'Unknown'}
-                    </Text>
-                </View>
+                <Text style={styles.transcriptText}>{item.transcript || 'No transcript'}</Text>
             </View>
-            <View style={[styles.statusBadge, styles.statusEnrolled]}>
-                <Text style={[styles.statusText, styles.statusTextEnrolled]}>
-                    {item.emotion || 'Neutral'}
-                </Text>
-            </View>
-        </View>
-    );
+        );
+    };
+
+    const reRecordLabel = reRecordStatus === 'recording' ? 'Recording…'
+        : reRecordStatus === 'done' ? 'Done!'
+        : reRecordStatus === 'error' ? 'Failed'
+        : 'Re-record';
 
     return (
         <View style={styles.container}>
@@ -71,7 +106,23 @@ export default function VoiceHistory() {
                     <Ionicons name="chevron-back" size={24} color={COLORS.icon} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Voice History</Text>
-                <View style={{ width: 44 }} />
+                <TouchableOpacity
+                    onPress={handleReRecord}
+                    disabled={reRecordStatus === 'recording'}
+                    style={styles.reRecordBtn}
+                >
+                    <Ionicons
+                        name={reRecordStatus === 'recording' ? 'radio-outline' : 'mic-outline'}
+                        size={16}
+                        color={reRecordStatus === 'recording' ? COLORS.danger : COLORS.accent}
+                    />
+                    <Text style={[
+                        styles.reRecordText,
+                        reRecordStatus === 'recording' && { color: COLORS.danger },
+                        reRecordStatus === 'done' && { color: '#34c759' },
+                        reRecordStatus === 'error' && { color: COLORS.danger },
+                    ]}>{reRecordLabel}</Text>
+                </TouchableOpacity>
             </View>
 
             {loading ? (
@@ -96,6 +147,14 @@ export default function VoiceHistory() {
                     </View>
                     <Text style={styles.emptyTitle}>No Memories</Text>
                     <Text style={styles.emptySubtitle}>Your recorded memories will appear here.</Text>
+                    <TouchableOpacity
+                        onPress={handleReRecord}
+                        style={styles.emptyReRecordBtn}
+                        disabled={reRecordStatus === 'recording'}
+                    >
+                        <Ionicons name="mic-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.emptyReRecordText}>Start Recording</Text>
+                    </TouchableOpacity>
                 </View>
             )}
         </View>
@@ -104,9 +163,10 @@ export default function VoiceHistory() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.bg },
+
     header: {
         marginTop: 60, paddingHorizontal: 24, marginBottom: 20,
-        flexDirection: 'row', alignItems: 'center',
+        flexDirection: 'row', alignItems: 'center', gap: 12,
     },
     pillButton: {
         width: 44, height: 44, borderRadius: 22,
@@ -114,32 +174,36 @@ const styles = StyleSheet.create({
         ...SHADOWS.button,
     },
     headerTitle: {
-        flex: 1, color: COLORS.text, fontSize: 28,
+        flex: 1, color: COLORS.text, fontSize: 24,
         fontFamily: 'Garamond-Bold', fontWeight: 'bold', textAlign: 'center',
     },
+    reRecordBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        backgroundColor: COLORS.surface, borderRadius: 20,
+        paddingHorizontal: 14, paddingVertical: 10, ...SHADOWS.button,
+    },
+    reRecordText: { color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Regular', fontWeight: '600' },
+
     listContent: { paddingHorizontal: 24, paddingBottom: 40 },
 
     historyCard: {
-        backgroundColor: COLORS.surface, borderRadius: 22, padding: 18,
-        marginBottom: 12, flexDirection: 'row', alignItems: 'center',
-        justifyContent: 'space-between', ...SHADOWS.card,
+        backgroundColor: COLORS.surface, borderRadius: 20, padding: 16,
+        marginBottom: 10, ...SHADOWS.card,
     },
-    cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-    avatarCircle: {
-        width: 44, height: 44, borderRadius: 16,
-        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
-        marginRight: 14, ...SHADOWS.small,
+    rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+    timeText: {
+        color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Bold',
+        fontWeight: '600', minWidth: 50,
     },
-    cardInfo: { flex: 1 },
-    cardName: { color: COLORS.text, fontSize: 17, fontFamily: 'Garamond-Bold', fontWeight: '600' },
-    cardDate: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', marginTop: 2 },
-
-    statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-    statusEnrolled: { backgroundColor: 'rgba(52, 199, 89, 0.12)' },
-    statusPending: { backgroundColor: COLORS.accentSoft },
-    statusText: { fontSize: 13, fontFamily: 'Garamond-Regular', fontWeight: '600' },
-    statusTextEnrolled: { color: '#34c759' },
-    statusTextPending: { color: COLORS.accent },
+    speakerText: {
+        color: COLORS.text, fontSize: 14, fontFamily: 'Garamond-Bold', fontWeight: '700',
+    },
+    emotionBadge: {
+        marginLeft: 'auto', fontSize: 12, fontFamily: 'Garamond-Regular', fontWeight: '600',
+    },
+    transcriptText: {
+        color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular', lineHeight: 20,
+    },
 
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 },
     emptyIconWrap: {
@@ -148,5 +212,13 @@ const styles = StyleSheet.create({
         marginBottom: 16, ...SHADOWS.card,
     },
     emptyTitle: { color: COLORS.text, fontSize: 20, fontFamily: 'Garamond-Bold', marginTop: 16 },
-    emptySubtitle: { color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular', marginTop: 6 },
+    emptySubtitle: {
+        color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular',
+        marginTop: 6, marginBottom: 24,
+    },
+    emptyReRecordBtn: {
+        backgroundColor: COLORS.accent, flexDirection: 'row', alignItems: 'center',
+        paddingVertical: 14, paddingHorizontal: 24, borderRadius: 16, ...SHADOWS.button,
+    },
+    emptyReRecordText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 });
