@@ -1,5 +1,5 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator, Alert } from 'react-native';
-import React, { useState, useEffect, useCallback } from 'react';
+import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator, Alert, Animated } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -15,24 +15,65 @@ function emotionColor(emotion) {
     }
 }
 
+// Poll cadence
+const POLL_LIVE_MS   = 2000;   // when streaming → poll fast
+const POLL_IDLE_MS   = 8000;   // when idle → poll slow
+const NEW_FLASH_MS   = 2500;   // duration to flash a new memory
+
 export default function VoiceHistory() {
     const router = useRouter();
 
-    const [memories, setMemories] = useState([]);
-    const [refreshing, setRefreshing] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [reRecordStatus, setReRecordStatus] = useState('idle'); // idle | recording | done | error
+    const [memories, setMemories]           = useState([]);
+    const [refreshing, setRefreshing]       = useState(false);
+    const [loading, setLoading]             = useState(true);
+    const [reRecordStatus, setReRecordStatus] = useState('idle');
+    const [streaming, setStreaming]         = useState(false);   // live stream on/off
+    const [newIds, setNewIds]               = useState(new Set());  // ids that just arrived
 
-    const fetchMemories = async () => {
+    // Refs for polling logic
+    const knownIdsRef = useRef(new Set());
+    const pollTimerRef = useRef(null);
+
+    // ── Fetch ─────────────────────────────────────────────────
+    const fetchMemories = async (silent = false) => {
         try {
             const userId = await AsyncStorage.getItem('user_id');
             let url = `${AI_URL}/api/memories?limit=50`;
             if (userId) url += `&user_id=${userId}`;
             const response = await fetch(url);
-            if (response.ok) {
-                const data = await response.json();
-                setMemories(Array.isArray(data) ? data : data.memories || []);
+            if (!response.ok) return;
+            const data = await response.json();
+            const list = Array.isArray(data) ? data : data.memories || [];
+
+            // Detect new memories (compare IDs)
+            const fresh = new Set();
+            for (const m of list) {
+                if (m.id != null && !knownIdsRef.current.has(m.id)) {
+                    fresh.add(m.id);
+                }
             }
+
+            // Update known IDs
+            knownIdsRef.current = new Set(list.map(m => m.id).filter(x => x != null));
+
+            // Only flash if we already loaded once (skip first load)
+            if (!silent && fresh.size > 0 && memories.length > 0) {
+                setNewIds(prev => {
+                    const next = new Set(prev);
+                    fresh.forEach(id => next.add(id));
+                    return next;
+                });
+                // Auto-clear flash after a moment
+                setTimeout(() => {
+                    setNewIds(prev => {
+                        const next = new Set(prev);
+                        fresh.forEach(id => next.delete(id));
+                        return next;
+                    });
+                }, NEW_FLASH_MS);
+            }
+
+            setMemories(list);
         } catch (error) {
             console.error('Error fetching memories:', error);
         } finally {
@@ -41,15 +82,41 @@ export default function VoiceHistory() {
         }
     };
 
+    // ── Polling loop ─────────────────────────────────────────
     useEffect(() => {
-        fetchMemories();
-    }, []);
+        fetchMemories(true); // first load (silent — don't flash)
+        // (re-)start poll loop whenever streaming flag changes
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+        const interval = streaming ? POLL_LIVE_MS : POLL_IDLE_MS;
+        pollTimerRef.current = setInterval(() => fetchMemories(false), interval);
+        return () => {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+        };
+    }, [streaming]);
 
+    // ── Pull-to-refresh ──────────────────────────────────────
     const onRefresh = useCallback(() => {
         setRefreshing(true);
-        fetchMemories();
+        fetchMemories(true);
     }, []);
 
+    // ── Live stream toggle ───────────────────────────────────
+    const toggleStream = async () => {
+        const endpoint = streaming ? 'stop' : 'start';
+        try {
+            const res = await fetch(`${AI_URL}/api/bracelet/stream/${endpoint}`, { method: 'POST' });
+            if (res.ok) {
+                setStreaming(!streaming);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                Alert.alert('Stream', err.detail || 'Bracelet not connected.');
+            }
+        } catch (e) {
+            Alert.alert('Stream', 'Could not reach Memonic server.');
+        }
+    };
+
+    // ── 5s manual recording ──────────────────────────────────
     const handleReRecord = async () => {
         if (reRecordStatus === 'recording') return;
         setReRecordStatus('recording');
@@ -59,7 +126,7 @@ export default function VoiceHistory() {
                 setReRecordStatus('done');
                 setTimeout(() => {
                     setReRecordStatus('idle');
-                    fetchMemories();
+                    fetchMemories(false);
                 }, 6000);
             } else {
                 setReRecordStatus('error');
@@ -73,6 +140,7 @@ export default function VoiceHistory() {
         }
     };
 
+    // ── Render row ───────────────────────────────────────────
     const renderItem = ({ item }) => {
         const time = item.timestamp
             ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -80,9 +148,15 @@ export default function VoiceHistory() {
         const speaker = (item.speaker && item.speaker !== 'Unknown' && item.speaker !== 'unknown')
             ? item.speaker : 'Unknown';
         const emotion = item.emotion || 'Neutral';
+        const isNew = newIds.has(item.id);
 
         return (
-            <View style={styles.historyCard}>
+            <View style={[styles.historyCard, isNew && styles.newCard]}>
+                {isNew && (
+                    <View style={styles.newBadge}>
+                        <Text style={styles.newBadgeText}>NEW</Text>
+                    </View>
+                )}
                 <View style={styles.rowTop}>
                     <Text style={styles.timeText}>{time}</Text>
                     <Text style={styles.speakerText}>{speaker}:</Text>
@@ -106,24 +180,51 @@ export default function VoiceHistory() {
                     <Ionicons name="chevron-back" size={24} color={COLORS.icon} />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Voice History</Text>
+
+                {/* Live stream toggle */}
                 <TouchableOpacity
-                    onPress={handleReRecord}
-                    disabled={reRecordStatus === 'recording'}
-                    style={styles.reRecordBtn}
+                    onPress={toggleStream}
+                    style={[styles.streamBtn, streaming && styles.streamBtnActive]}
                 >
-                    <Ionicons
-                        name={reRecordStatus === 'recording' ? 'radio-outline' : 'mic-outline'}
-                        size={16}
-                        color={reRecordStatus === 'recording' ? COLORS.danger : COLORS.accent}
-                    />
-                    <Text style={[
-                        styles.reRecordText,
-                        reRecordStatus === 'recording' && { color: COLORS.danger },
-                        reRecordStatus === 'done' && { color: '#34c759' },
-                        reRecordStatus === 'error' && { color: COLORS.danger },
-                    ]}>{reRecordLabel}</Text>
+                    <View style={[styles.liveDot, streaming && styles.liveDotActive]} />
+                    <Text style={[styles.streamText, streaming && { color: '#fff' }]}>
+                        {streaming ? 'LIVE' : 'Live'}
+                    </Text>
                 </TouchableOpacity>
             </View>
+
+            {/* Status banner */}
+            {streaming && (
+                <View style={styles.liveBanner}>
+                    <View style={styles.liveBannerDot} />
+                    <Text style={styles.liveBannerText}>
+                        Streaming • new memories appear automatically
+                    </Text>
+                </View>
+            )}
+
+            {/* Re-record button (only when not streaming) */}
+            {!streaming && (
+                <View style={styles.subHeader}>
+                    <TouchableOpacity
+                        onPress={handleReRecord}
+                        disabled={reRecordStatus === 'recording'}
+                        style={styles.reRecordBtn}
+                    >
+                        <Ionicons
+                            name={reRecordStatus === 'recording' ? 'radio-outline' : 'mic-outline'}
+                            size={16}
+                            color={reRecordStatus === 'recording' ? COLORS.danger : COLORS.accent}
+                        />
+                        <Text style={[
+                            styles.reRecordText,
+                            reRecordStatus === 'recording' && { color: COLORS.danger },
+                            reRecordStatus === 'done' && { color: '#34c759' },
+                            reRecordStatus === 'error' && { color: COLORS.danger },
+                        ]}>{reRecordLabel}</Text>
+                    </TouchableOpacity>
+                </View>
+            )}
 
             {loading ? (
                 <View style={styles.emptyState}>
@@ -146,15 +247,21 @@ export default function VoiceHistory() {
                         <Ionicons name="mic-off-outline" size={48} color={COLORS.textMuted} />
                     </View>
                     <Text style={styles.emptyTitle}>No Memories</Text>
-                    <Text style={styles.emptySubtitle}>Your recorded memories will appear here.</Text>
-                    <TouchableOpacity
-                        onPress={handleReRecord}
-                        style={styles.emptyReRecordBtn}
-                        disabled={reRecordStatus === 'recording'}
-                    >
-                        <Ionicons name="mic-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-                        <Text style={styles.emptyReRecordText}>Start Recording</Text>
-                    </TouchableOpacity>
+                    <Text style={styles.emptySubtitle}>
+                        {streaming
+                            ? 'Listening… speak to create your first memory.'
+                            : 'Tap LIVE to start, or use Re-record for a single clip.'}
+                    </Text>
+                    {!streaming && (
+                        <TouchableOpacity
+                            onPress={handleReRecord}
+                            style={styles.emptyReRecordBtn}
+                            disabled={reRecordStatus === 'recording'}
+                        >
+                            <Ionicons name="mic-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
+                            <Text style={styles.emptyReRecordText}>Start Recording</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
         </View>
@@ -165,7 +272,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: COLORS.bg },
 
     header: {
-        marginTop: 60, paddingHorizontal: 24, marginBottom: 20,
+        marginTop: 60, paddingHorizontal: 24, marginBottom: 12,
         flexDirection: 'row', alignItems: 'center', gap: 12,
     },
     pillButton: {
@@ -177,6 +284,33 @@ const styles = StyleSheet.create({
         flex: 1, color: COLORS.text, fontSize: 24,
         fontFamily: 'Garamond-Bold', fontWeight: 'bold', textAlign: 'center',
     },
+
+    // Live stream toggle
+    streamBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        backgroundColor: COLORS.surface, borderRadius: 20,
+        paddingHorizontal: 14, paddingVertical: 10, ...SHADOWS.button,
+    },
+    streamBtnActive: { backgroundColor: COLORS.danger },
+    liveDot: {
+        width: 8, height: 8, borderRadius: 4,
+        backgroundColor: COLORS.textMuted,
+    },
+    liveDotActive: { backgroundColor: '#fff' },
+    streamText: { color: COLORS.accent, fontSize: 13, fontWeight: '700', letterSpacing: 0.8 },
+
+    // Live banner
+    liveBanner: {
+        marginHorizontal: 24, marginBottom: 12, paddingHorizontal: 14, paddingVertical: 8,
+        backgroundColor: 'rgba(255, 69, 58, 0.10)', borderRadius: 14,
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+    },
+    liveBannerDot: {
+        width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.danger,
+    },
+    liveBannerText: { color: COLORS.danger, fontSize: 12, fontWeight: '600' },
+
+    subHeader: { paddingHorizontal: 24, marginBottom: 12, alignItems: 'flex-end' },
     reRecordBtn: {
         flexDirection: 'row', alignItems: 'center', gap: 5,
         backgroundColor: COLORS.surface, borderRadius: 20,
@@ -189,7 +323,20 @@ const styles = StyleSheet.create({
     historyCard: {
         backgroundColor: COLORS.surface, borderRadius: 20, padding: 16,
         marginBottom: 10, ...SHADOWS.card,
+        position: 'relative',
     },
+    newCard: {
+        borderWidth: 1.5,
+        borderColor: COLORS.accent,
+        backgroundColor: 'rgba(232, 115, 74, 0.08)',
+    },
+    newBadge: {
+        position: 'absolute', top: -7, right: 12,
+        backgroundColor: COLORS.accent, paddingHorizontal: 8, paddingVertical: 2,
+        borderRadius: 8,
+    },
+    newBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+
     rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
     timeText: {
         color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Bold',
@@ -214,7 +361,7 @@ const styles = StyleSheet.create({
     emptyTitle: { color: COLORS.text, fontSize: 20, fontFamily: 'Garamond-Bold', marginTop: 16 },
     emptySubtitle: {
         color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular',
-        marginTop: 6, marginBottom: 24,
+        marginTop: 6, marginBottom: 24, textAlign: 'center', paddingHorizontal: 30,
     },
     emptyReRecordBtn: {
         backgroundColor: COLORS.accent, flexDirection: 'row', alignItems: 'center',
