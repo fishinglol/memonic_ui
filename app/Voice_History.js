@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AI_URL } from '../constants/config';
 import { COLORS, SHADOWS } from '../constants/theme';
+import { useRelay } from '../context/RelayContext';
 
 function emotionColor(emotion) {
     switch (emotion) {
@@ -22,6 +23,7 @@ const NEW_FLASH_MS   = 2500;   // duration to flash a new memory
 
 export default function VoiceHistory() {
     const router = useRouter();
+    const relay  = useRelay();
 
     const [memories, setMemories]           = useState([]);
     const [refreshing, setRefreshing]       = useState(false);
@@ -193,7 +195,20 @@ export default function VoiceHistory() {
                 </TouchableOpacity>
             </View>
 
-            {/* Status banner */}
+            {/* Relay status banner — shows phone IP for ESP32 config */}
+            <View style={styles.relayBanner}>
+                <View style={[styles.relayDot, {
+                    backgroundColor: (relay?.udpReady && relay?.wsReady) ? '#34c759' : COLORS.danger,
+                }]} />
+                <Text style={styles.relayText}>
+                    Phone IP: {relay?.phoneIP || '—'}:{relay?.udpListenPort || 5005}  •
+                    UDP {relay?.udpReady ? 'ON' : 'OFF'}  •
+                    WSS {relay?.wsReady ? 'ON' : 'OFF'}
+                    {relay?.esp32Addr ? `  •  ESP32: ${relay.esp32Addr.ip}` : '  •  no ESP32 yet'}
+                </Text>
+            </View>
+
+            {/* Live stream banner */}
             {streaming && (
                 <View style={styles.liveBanner}>
                     <View style={styles.liveBannerDot} />
@@ -298,6 +313,15 @@ const styles = StyleSheet.create({
     },
     liveDotActive: { backgroundColor: '#fff' },
     streamText: { color: COLORS.accent, fontSize: 13, fontWeight: '700', letterSpacing: 0.8 },
+
+    // Relay banner
+    relayBanner: {
+        marginHorizontal: 24, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 7,
+        backgroundColor: COLORS.surfaceDeep || COLORS.surface, borderRadius: 10,
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+    },
+    relayDot: { width: 7, height: 7, borderRadius: 4 },
+    relayText: { color: COLORS.textMuted, fontSize: 11, flex: 1 },
 
     // Live banner
     liveBanner: {

@@ -1,5 +1,6 @@
 import { Stack } from 'expo-router';
 import { BLEProvider } from '../context/BLEContext';
+import { RelayProvider } from '../context/RelayContext';
 import { useEffect } from 'react';
 import * as SplashScreen from 'expo-splash-screen';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ export default function RootLayout() {
     }
 
     return (
+        <RelayProvider>
         <BLEProvider>
             <Stack screenOptions={{ headerShown: false }}>
             {/* 1. หน้า Login อยู่ข้างนอก (ไม่มี Tab) */}
@@ -43,5 +45,6 @@ export default function RootLayout() {
             <Stack.Screen name="signin" />
             </Stack>
         </BLEProvider>
+        </RelayProvider>
     );
 }
