@@ -1,22 +1,22 @@
-import { Text, View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert } from 'react-native';
-import React, { useState, useEffect } from 'react';
+import { Text, View, StyleSheet, ScrollView, TouchableOpacity, Dimensions, Alert, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { COLORS, SHADOWS } from '../../constants/theme';
 import { AI_URL } from '../../constants/config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const AI_BASE_URL = AI_URL;
-
-const MOCK_MOOD_HISTORY = [
-    { time: '9a', val: 0.2 },
-    { time: '11a', val: 0.5 },
-    { time: '1p', val: 0.8 },
-    { time: '3p', val: 0.9 },
-    { time: '5p', val: 0.6 },
-    { time: 'Now', val: 0.3 },
-];
+// Emotion → bar color
+function emotionBarColor(emotion) {
+    switch (emotion) {
+        case 'Happy':   return '#34c759';
+        case 'Sad':     return '#5e9ef4';
+        case 'Angry':   return COLORS.danger;
+        default:        return COLORS.accent;
+    }
+}
 
 function getGreeting() {
     const hour = new Date().getHours();
@@ -34,49 +34,134 @@ function getFormattedDate() {
 
 export default function Home() {
     const router = useRouter();
-    const [highlights, setHighlights] = useState('Loading...');
-    const [aiTasks, setAiTasks] = useState([]);
-    const [updatedAt, setUpdatedAt] = useState(null);
+    const [userName, setUserName] = useState('');
+
+    // Today's summary state
+    const [summary, setSummary] = useState('Loading your day...');
+    const [summaryMeta, setSummaryMeta] = useState(null);   // { total_memories, speakers_seen, dominant_emotion, emoji, time_range }
+    const [summaryLoading, setSummaryLoading] = useState(true);
+    const [summaryUpdatedAt, setSummaryUpdatedAt] = useState(null);
+
+    // Mood state
+    const [moodData, setMoodData] = useState(null);
+
+    // Voice records (preview)
+    const [voiceRecords, setVoiceRecords] = useState([]);
+
+    // Upcoming events
     const [upcomingEvents, setUpcomingEvents] = useState([]);
     const [eventsLoading, setEventsLoading] = useState(true);
-    const [moodData, setMoodData] = useState(null);
-    const [voiceRecords, setVoiceRecords] = useState([]);
-    const [reRecordStatus, setReRecordStatus] = useState('idle'); // idle | recording | done | error
 
-    const fetchHomeData = async () => {
+    // AI tasks
+    const [aiTasks, setAiTasks] = useState([]);
+
+    // Re-record quick action
+    const [reRecordStatus, setReRecordStatus] = useState('idle');
+
+    // ── Load username ────────────────────────────────────────────
+    useEffect(() => {
+        AsyncStorage.getItem('user_name').then(n => { if (n) setUserName(n); });
+    }, []);
+
+    // ── Fetch today-summary ──────────────────────────────────────
+    const fetchSummary = useCallback(async (forceRefresh = false) => {
+        setSummaryLoading(true);
         try {
-            const res = await fetch(`${AI_BASE_URL}/api/get-home-data/fish`);
+            const url = `${AI_URL}/api/today-summary/fish${forceRefresh ? '?refresh=true' : ''}`;
+            const res = await fetch(url);
             const data = await res.json();
-            if (res.ok && !data.error) {
-                setHighlights(data.highlights || 'Start talking to Memonic to see your highlights.');
-                setAiTasks((data.tasks || []).map((text, i) => ({ id: String(i + 1), text, done: false })));
-                setUpdatedAt(data.updated_at);
-            }
+            setSummary(data.summary || 'Start talking to Memonic to see your daily recap.');
+            setSummaryMeta({
+                total_memories: data.total_memories ?? 0,
+                speakers_seen: data.speakers_seen ?? [],
+                dominant_emotion: data.dominant_emotion ?? 'Neutral',
+                emoji: data.emoji ?? '😌',
+                time_range: data.time_range ?? null,
+            });
+            setSummaryUpdatedAt(data.updated_at ?? null);
         } catch (e) {
-            console.error('Failed to fetch home data:', e);
-            setHighlights('Connect to Memonic Server to see your highlights.');
+            setSummary('Connect to Memonic Server to see your highlights.');
+            setSummaryMeta(null);
+        } finally {
+            setSummaryLoading(false);
         }
-    };
+    }, []);
 
-    const fetchVoiceRecords = async () => {
+    // ── Fetch mood ───────────────────────────────────────────────
+    const fetchMood = useCallback(async () => {
         try {
-            const res = await fetch(`${AI_BASE_URL}/api/memories?limit=5`);
+            const res = await fetch(`${AI_URL}/api/get-mood/fish`);
+            const data = await res.json();
+            setMoodData(data);
+        } catch (e) { /* silent */ }
+    }, []);
+
+    // ── Fetch voice records preview ──────────────────────────────
+    const fetchVoiceRecords = useCallback(async () => {
+        try {
+            const res = await fetch(`${AI_URL}/api/memories?limit=5`);
             const data = await res.json();
             setVoiceRecords(Array.isArray(data) ? data : data.memories || []);
         } catch (e) { /* silent */ }
-    };
+    }, []);
 
+    // ── Fetch AI tasks via home-data (ChromaDB) ──────────────────
+    const fetchAiTasks = useCallback(async () => {
+        try {
+            const res = await fetch(`${AI_URL}/api/get-home-data/fish`);
+            const data = await res.json();
+            if (res.ok && !data.error) {
+                setAiTasks((data.tasks || []).map((text, i) => ({ id: String(i + 1), text, done: false })));
+            }
+        } catch (e) { /* silent */ }
+    }, []);
+
+    // ── Initial load ─────────────────────────────────────────────
+    useEffect(() => {
+        fetchSummary();
+        fetchMood();
+        fetchVoiceRecords();
+        fetchAiTasks();
+
+        // Upcoming events
+        const fetchEvents = async () => {
+            try {
+                const res = await fetch(`${AI_URL}/api/get-events/fish`);
+                const data = await res.json();
+                setUpcomingEvents(data.events || []);
+            } catch (e) { /* silent */ }
+            finally { setEventsLoading(false); }
+        };
+        fetchEvents();
+
+        // Popup check every 10s
+        const popupInterval = setInterval(async () => {
+            try {
+                const res = await fetch(`${AI_URL}/api/check-popup/fish`);
+                const data = await res.json();
+                if (data.has_popup) Alert.alert('Memonic', data.message);
+            } catch (e) { /* silent */ }
+        }, 10000);
+
+        // Refresh summary + mood every 5 min
+        const refreshInterval = setInterval(() => {
+            fetchSummary();
+            fetchMood();
+            fetchVoiceRecords();
+        }, 5 * 60 * 1000);
+
+        return () => { clearInterval(popupInterval); clearInterval(refreshInterval); };
+    }, []);
+
+    // ── Quick re-record ──────────────────────────────────────────
     const handleReRecord = async () => {
         if (reRecordStatus === 'recording') return;
         setReRecordStatus('recording');
         try {
-            const res = await fetch(`${AI_BASE_URL}/api/bracelet/record`, { method: 'POST' });
+            const res = await fetch(`${AI_URL}/api/bracelet/record`, { method: 'POST' });
             if (res.ok) {
                 setReRecordStatus('done');
-                setTimeout(() => {
-                    setReRecordStatus('idle');
-                    fetchVoiceRecords();
-                }, 6000);
+                setTimeout(() => { setReRecordStatus('idle'); fetchVoiceRecords(); }, 6000);
             } else {
                 setReRecordStatus('error');
                 setTimeout(() => setReRecordStatus('idle'), 3000);
@@ -89,56 +174,21 @@ export default function Home() {
         }
     };
 
-    useEffect(() => {
-        fetchHomeData();
-        fetchVoiceRecords();
-
-        const fetchEvents = async () => {
-            try {
-                const res = await fetch(`${AI_BASE_URL}/api/get-events/fish`);
-                const data = await res.json();
-                setUpcomingEvents(data.events || []);
-            } catch (err) { console.error('Failed to fetch events:', err); }
-            finally { setEventsLoading(false); }
-        };
-        fetchEvents();
-
-        const fetchMood = async () => {
-            try {
-                const res = await fetch(`${AI_BASE_URL}/api/get-mood/fish`);
-                const data = await res.json();
-                setMoodData(data);
-            } catch (err) { console.error('Failed to fetch mood:', err); }
-        };
-        fetchMood();
-
-        const popupInterval = setInterval(async () => {
-            try {
-                const res = await fetch(`${AI_BASE_URL}/api/check-popup/fish`);
-                const data = await res.json();
-                if (data.has_popup) Alert.alert('Memonic', data.message);
-            } catch (e) { /* silent */ }
-        }, 10000);
-
-        const homeInterval = setInterval(fetchHomeData, 5 * 60 * 1000);
-        return () => { clearInterval(popupInterval); clearInterval(homeInterval); };
-    }, []);
-
-    const toggleTask = async (id) => {
-        const targetTask = aiTasks.find(t => t.id === id);
-        if (!targetTask) return;
-        const newStatus = !targetTask.done;
-        setAiTasks(prev => prev.map(t => t.id === id ? { ...t, done: newStatus } : t));
-        try {
-            await fetch(`${AI_BASE_URL}/api/update-task/fish`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ task_id: id, done: newStatus }),
-            });
-        } catch (error) { console.error('Failed to sync task status:', error); }
+    // ── Task toggle ──────────────────────────────────────────────
+    const toggleTask = (id) => {
+        setAiTasks(prev => prev.map(t => t.id === id ? { ...t, done: !t.done } : t));
     };
 
     const completedCount = aiTasks.filter(t => t.done).length;
+
+    // ── Mood bar chart data ──────────────────────────────────────
+    const moodBars = moodData?.hourly_moods?.length > 0
+        ? moodData.hourly_moods
+        : [];
+
+    const updatedMinAgo = summaryUpdatedAt
+        ? Math.max(0, Math.round((Date.now() / 1000 - summaryUpdatedAt) / 60))
+        : null;
 
     return (
         <View style={styles.container}>
@@ -146,30 +196,63 @@ export default function Home() {
 
                 {/* Greeting */}
                 <View style={styles.greetingSection}>
-                    <Text style={styles.greetingText}>{getGreeting()}, Fais</Text>
+                    <Text style={styles.greetingText}>{getGreeting()}{userName ? `, ${userName}` : ''}</Text>
                     <Text style={styles.dateText}>{getFormattedDate()}</Text>
                 </View>
 
-                {/* Highlights */}
+                {/* ── Today's Highlights (dynamic) ── */}
                 <View style={styles.highlightCard}>
                     <View style={styles.highlightHeader}>
                         <View style={styles.highlightIconWrap}>
-                            <Ionicons name="sparkles" size={18} color={COLORS.icon} />
+                            <Text style={{ fontSize: 16 }}>{summaryMeta?.emoji || '✨'}</Text>
                         </View>
-                        <Text style={styles.highlightTitle}>Today's Highlights</Text>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.highlightTitle}>Today's Summary</Text>
+                        </View>
+                        <TouchableOpacity onPress={() => fetchSummary(true)} style={styles.refreshBtn}>
+                            <Ionicons name="refresh-outline" size={16} color={COLORS.accent} />
+                        </TouchableOpacity>
                     </View>
-                    <Text style={styles.highlightBody}>{highlights}</Text>
+
+                    {summaryLoading ? (
+                        <ActivityIndicator size="small" color={COLORS.accent} style={{ marginVertical: 12 }} />
+                    ) : (
+                        <Text style={styles.highlightBody}>{summary}</Text>
+                    )}
+
+                    {/* Metadata row */}
+                    {summaryMeta && summaryMeta.total_memories > 0 && (
+                        <View style={styles.metaRow}>
+                            <View style={styles.metaBadge}>
+                                <Ionicons name="mic-outline" size={11} color={COLORS.accent} />
+                                <Text style={styles.metaBadgeText}>{summaryMeta.total_memories} memories</Text>
+                            </View>
+                            {summaryMeta.speakers_seen?.length > 0 && (
+                                <View style={styles.metaBadge}>
+                                    <Ionicons name="people-outline" size={11} color={COLORS.accent} />
+                                    <Text style={styles.metaBadgeText}>{summaryMeta.speakers_seen.join(', ')}</Text>
+                                </View>
+                            )}
+                            {summaryMeta.time_range && (
+                                <View style={styles.metaBadge}>
+                                    <Ionicons name="time-outline" size={11} color={COLORS.accent} />
+                                    <Text style={styles.metaBadgeText}>{summaryMeta.time_range}</Text>
+                                </View>
+                            )}
+                        </View>
+                    )}
+
                     <View style={styles.highlightMeta}>
-                        <Ionicons name="time-outline" size={13} color={COLORS.textMuted} />
+                        <Ionicons name="time-outline" size={12} color={COLORS.textMuted} />
                         <Text style={styles.highlightMetaText}>
-                            {updatedAt
-                                ? `Updated ${Math.round((Date.now() / 1000 - updatedAt) / 60)} min ago`
-                                : 'Loading...'}
+                            {updatedMinAgo !== null
+                                ? updatedMinAgo === 0 ? 'Just updated' : `Updated ${updatedMinAgo} min ago`
+                                : 'Tap ↺ to generate'}
                         </Text>
                     </View>
                 </View>
 
-                {/* Voice Records */}
+                {/* ── Voice Records preview ── */}
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Voice Records</Text>
                     <View style={styles.voiceHeaderActions}>
@@ -226,18 +309,14 @@ export default function Home() {
                     })}
                 </View>
 
-                {/* Upcoming */}
+                {/* ── Upcoming Events ── */}
                 <View style={[styles.sectionHeader, { marginTop: 28 }]}>
                     <Text style={styles.sectionTitle}>Upcoming</Text>
-                    <TouchableOpacity>
-                        <Text style={styles.seeAllText}>See all</Text>
-                    </TouchableOpacity>
+                    <TouchableOpacity><Text style={styles.seeAllText}>See all</Text></TouchableOpacity>
                 </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.upcomingScroll}>
                     {eventsLoading ? (
-                        [1, 2, 3].map(i => (
-                            <View key={i} style={[styles.eventCard, styles.skeletonCard]} />
-                        ))
+                        [1, 2, 3].map(i => <View key={i} style={[styles.eventCard, styles.skeletonCard]} />)
                     ) : upcomingEvents.length === 0 ? (
                         <View style={styles.eventCard}>
                             <View style={styles.eventIconWrap}>
@@ -250,7 +329,7 @@ export default function Home() {
                         upcomingEvents.map((event) => (
                             <View key={event.id} style={styles.eventCard}>
                                 <View style={styles.eventIconWrap}>
-                                    <Ionicons name={event.icon} size={20} color={COLORS.icon} />
+                                    <Ionicons name={event.icon || 'calendar-outline'} size={20} color={COLORS.icon} />
                                 </View>
                                 <Text style={styles.eventTime}>{event.time}</Text>
                                 <Text style={styles.eventTitle}>{event.title}</Text>
@@ -260,60 +339,73 @@ export default function Home() {
                     )}
                 </ScrollView>
 
-                {/* Mood Timeline */}
+                {/* ── Mood Timeline (real data) ── */}
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Mood Timeline</Text>
+                    {moodData?.label && (
+                        <Text style={styles.moodLabel}>{moodData.emoji} {moodData.label}</Text>
+                    )}
                 </View>
                 <View style={styles.moodGraphContainer}>
                     <View style={styles.moodYAxis}>
-                        <Text style={styles.moodYText}>Stress</Text>
-                        <Text style={styles.moodYText}>Valid</Text>
-                        <Text style={styles.moodYText}>Sad</Text>
+                        <Text style={styles.moodYText}>Tense</Text>
+                        <Text style={styles.moodYText}>Calm</Text>
+                        <Text style={styles.moodYText}>Happy</Text>
                     </View>
                     <View style={styles.moodGraphArea}>
                         <View style={[styles.graphGuide, { top: '10%' }]} />
                         <View style={[styles.graphGuide, { top: '45%' }]} />
                         <View style={[styles.graphGuide, { top: '80%' }]} />
                         <View style={styles.barsRow}>
-                            {MOCK_MOOD_HISTORY.map((item, idx) => {
-                                let color = COLORS.accent;
-                                if (item.val >= 0.8) color = COLORS.danger;
-                                else if (item.val <= 0.3) color = COLORS.textMuted;
-                                return (
+                            {moodBars.length > 0 ? (
+                                moodBars.map((item, idx) => (
                                     <View key={idx} style={styles.barCol}>
                                         <View style={styles.barTrack}>
-                                            <View style={[styles.barFill, { height: `${(item.val * 0.7 + 0.1) * 100}%`, backgroundColor: color }]} />
+                                            <View style={[styles.barFill, {
+                                                height: `${(item.val * 0.7 + 0.1) * 100}%`,
+                                                backgroundColor: emotionBarColor(item.emotion),
+                                            }]} />
                                         </View>
                                         <Text style={styles.moodXText}>{item.time}</Text>
                                     </View>
-                                );
-                            })}
+                                ))
+                            ) : (
+                                <View style={styles.moodEmpty}>
+                                    <Text style={styles.moodEmptyText}>
+                                        {moodData ? 'No mood data today yet' : 'Connecting...'}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
                     </View>
                 </View>
 
-                {/* AI Tasks */}
-                <View style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>AI Tasks</Text>
-                    <Text style={styles.taskCount}>{completedCount}/{aiTasks.length}</Text>
-                </View>
-                <View style={styles.tasksCard}>
-                    {aiTasks.map((task, index) => (
-                        <TouchableOpacity
-                            key={task.id}
-                            style={[styles.taskRow, index < aiTasks.length - 1 && styles.taskRowBorder]}
-                            onPress={() => toggleTask(task.id)}
-                            activeOpacity={0.7}
-                        >
-                            <View style={[styles.checkbox, task.done && styles.checkboxDone]}>
-                                {task.done && <Ionicons name="checkmark" size={14} color="#fff" />}
-                            </View>
-                            <Text style={[styles.taskText, task.done && styles.taskTextDone]}>
-                                {task.text}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </View>
+                {/* ── AI Tasks ── */}
+                {aiTasks.length > 0 && (
+                    <>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>AI Tasks</Text>
+                            <Text style={styles.taskCount}>{completedCount}/{aiTasks.length}</Text>
+                        </View>
+                        <View style={styles.tasksCard}>
+                            {aiTasks.map((task, index) => (
+                                <TouchableOpacity
+                                    key={task.id}
+                                    style={[styles.taskRow, index < aiTasks.length - 1 && styles.taskRowBorder]}
+                                    onPress={() => toggleTask(task.id)}
+                                    activeOpacity={0.7}
+                                >
+                                    <View style={[styles.checkbox, task.done && styles.checkboxDone]}>
+                                        {task.done && <Ionicons name="checkmark" size={14} color="#fff" />}
+                                    </View>
+                                    <Text style={[styles.taskText, task.done && styles.taskTextDone]}>
+                                        {task.text}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </>
+                )}
 
                 <View style={{ height: 30 }} />
             </ScrollView>
@@ -329,30 +421,43 @@ const styles = StyleSheet.create({
     greetingText: { color: COLORS.text, fontSize: 30, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
     dateText: { color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular', marginTop: 4 },
 
+    // ── Highlights ──
     highlightCard: {
         backgroundColor: COLORS.surface, borderRadius: 28, padding: 22,
         marginBottom: 28, ...SHADOWS.card,
     },
-    highlightHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    highlightHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 10 },
     highlightIconWrap: {
         width: 36, height: 36, borderRadius: 12,
         backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
-        marginRight: 10, ...SHADOWS.small,
+        ...SHADOWS.small,
     },
     highlightTitle: { color: COLORS.text, fontSize: 18, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
+    refreshBtn: {
+        width: 32, height: 32, borderRadius: 10,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
+    },
     highlightBody: {
         color: COLORS.textMuted, fontSize: 15, fontFamily: 'Garamond-Regular', lineHeight: 22, marginBottom: 12,
     },
-    highlightMeta: { flexDirection: 'row', alignItems: 'center' },
-    highlightMetaText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Garamond-Regular', marginLeft: 5 },
+    metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 },
+    metaBadge: {
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        backgroundColor: COLORS.accentSoft, borderRadius: 8,
+        paddingHorizontal: 8, paddingVertical: 3,
+    },
+    metaBadgeText: { color: COLORS.accent, fontSize: 11, fontFamily: 'Garamond-Regular' },
+    highlightMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    highlightMetaText: { color: COLORS.textMuted, fontSize: 12, fontFamily: 'Garamond-Regular' },
 
+    // ── Section headers ──
     sectionHeader: {
         flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14,
     },
     sectionTitle: { color: COLORS.text, fontSize: 20, fontFamily: 'Garamond-Bold', fontWeight: 'bold' },
     seeAllText: { color: COLORS.accent, fontSize: 14, fontFamily: 'Garamond-Regular' },
 
-    // ── Voice Records ──
+    // ── Voice records ──
     voiceHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
     reRecordBtn: {
         flexDirection: 'row', alignItems: 'center', gap: 5,
@@ -360,35 +465,24 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10, paddingVertical: 5,
     },
     reRecordText: { color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Regular', fontWeight: '600' },
-    voiceRecordsCard: {
-        backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden', ...SHADOWS.card,
-    },
+    voiceRecordsCard: { backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden', ...SHADOWS.card },
     voiceRow: {
         flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 18, gap: 6,
     },
     voiceRowBorder: { borderBottomWidth: 1, borderBottomColor: COLORS.divider },
-    voiceTime: {
-        color: COLORS.accent, fontSize: 12, fontFamily: 'Garamond-Regular',
-        fontWeight: '600', minWidth: 48,
-    },
-    voiceSpeaker: {
-        color: COLORS.text, fontSize: 13, fontFamily: 'Garamond-Bold', fontWeight: '700', minWidth: 54,
-    },
-    voiceTranscript: {
-        flex: 1, color: COLORS.textMuted, fontSize: 13,
-        fontFamily: 'Garamond-Regular', lineHeight: 18,
-    },
-    voiceEmptyRow: {
-        flexDirection: 'row', alignItems: 'center', gap: 8,
-        padding: 18, justifyContent: 'center',
-    },
+    voiceTime: { color: COLORS.accent, fontSize: 12, fontFamily: 'Garamond-Regular', fontWeight: '600', minWidth: 48 },
+    voiceSpeaker: { color: COLORS.text, fontSize: 13, fontFamily: 'Garamond-Bold', fontWeight: '700', minWidth: 54 },
+    voiceTranscript: { flex: 1, color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular', lineHeight: 18 },
+    voiceEmptyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 18, justifyContent: 'center' },
     voiceEmptyText: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular' },
 
+    // ── Upcoming events ──
     upcomingScroll: { paddingBottom: 4, marginBottom: 24 },
     eventCard: {
         backgroundColor: COLORS.surface, borderRadius: 24, padding: 20,
         width: SCREEN_WIDTH * 0.42, marginRight: 12, ...SHADOWS.card,
     },
+    skeletonCard: { width: 130, height: 120, backgroundColor: COLORS.surfaceDeep, borderRadius: 24, marginRight: 12 },
     eventIconWrap: {
         width: 40, height: 40, borderRadius: 14,
         backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
@@ -398,23 +492,28 @@ const styles = StyleSheet.create({
     eventTitle: { color: COLORS.text, fontSize: 16, fontFamily: 'Garamond-Bold', fontWeight: '600', marginBottom: 4 },
     eventLocation: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular' },
 
+    // ── Mood timeline ──
+    moodLabel: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular' },
     moodGraphContainer: { flexDirection: 'row', height: 160, marginBottom: 28, paddingRight: 10 },
     moodYAxis: { justifyContent: 'space-between', paddingVertical: 18, paddingRight: 10 },
     moodYText: { color: COLORS.textMuted, fontSize: 10, fontFamily: 'Garamond-Regular', textAlign: 'right' },
     moodGraphArea: { flex: 1, position: 'relative' },
     graphGuide: {
         position: 'absolute', left: 0, right: 0,
-        borderTopWidth: 1, borderTopColor: COLORS.divider, borderStyle: 'solid',
+        borderTopWidth: 1, borderTopColor: COLORS.divider,
     },
     barsRow: {
         flex: 1, flexDirection: 'row', alignItems: 'flex-end',
         justifyContent: 'space-between', paddingBottom: 22,
     },
-    barCol: { alignItems: 'center', width: 28 },
+    barCol: { alignItems: 'center', flex: 1 },
     barTrack: { flex: 1, justifyContent: 'flex-end', width: 14, marginBottom: 8 },
     barFill: { width: '100%', borderRadius: 7 },
-    moodXText: { color: COLORS.textMuted, fontSize: 11, fontFamily: 'Garamond-Regular', textAlign: 'center' },
+    moodXText: { color: COLORS.textMuted, fontSize: 10, fontFamily: 'Garamond-Regular', textAlign: 'center' },
+    moodEmpty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    moodEmptyText: { color: COLORS.textMuted, fontSize: 13, fontFamily: 'Garamond-Regular' },
 
+    // ── AI Tasks ──
     taskCount: { color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular' },
     tasksCard: { backgroundColor: COLORS.surface, borderRadius: 24, overflow: 'hidden', ...SHADOWS.card },
     taskRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
@@ -427,7 +526,4 @@ const styles = StyleSheet.create({
     checkboxDone: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
     taskText: { color: COLORS.text, fontSize: 15, fontFamily: 'Garamond-Regular', flex: 1, lineHeight: 20 },
     taskTextDone: { color: COLORS.textMuted, textDecorationLine: 'line-through' },
-    skeletonCard: {
-        width: 130, height: 120, backgroundColor: COLORS.surfaceDeep, borderRadius: 24, marginRight: 12,
-    },
 });

@@ -1,11 +1,16 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl, ActivityIndicator, Alert, Animated } from 'react-native';
+import {
+    Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl,
+    ActivityIndicator, Alert, Animated
+} from 'react-native';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
 import { AI_URL } from '../constants/config';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { useRelay } from '../context/RelayContext';
+import AddMemberSheet from '../components/sub_member';
 
 function emotionColor(emotion) {
     switch (emotion) {
@@ -16,28 +21,32 @@ function emotionColor(emotion) {
     }
 }
 
-// Poll cadence
-const POLL_LIVE_MS   = 2000;   // when streaming → poll fast
-const POLL_IDLE_MS   = 8000;   // when idle → poll slow
-const NEW_FLASH_MS   = 2500;   // duration to flash a new memory
+const POLL_LIVE_MS  = 1000;   // streaming → fast poll
+const POLL_IDLE_MS  = 8000;   // idle → slow poll
+const NEW_FLASH_MS  = 2500;
 
 export default function VoiceHistory() {
-    const router = useRouter();
-    const relay  = useRelay();
+    const router  = useRouter();
+    const relay   = useRelay();
 
-    const [memories, setMemories]           = useState([]);
-    const [refreshing, setRefreshing]       = useState(false);
-    const [loading, setLoading]             = useState(true);
+    const [memories, setMemories]             = useState([]);
+    const [refreshing, setRefreshing]         = useState(false);
+    const [loading, setLoading]               = useState(true);
     const [reRecordStatus, setReRecordStatus] = useState('idle');
-    const [streaming, setStreaming]         = useState(false);   // live stream on/off
-    const [newIds, setNewIds]               = useState(new Set());  // ids that just arrived
+    const [streaming, setStreaming]           = useState(false);
+    const [newIds, setNewIds]                 = useState(new Set());
+    const [enrollSheetVisible, setEnrollSheetVisible] = useState(false);
 
-    // Refs for polling logic
-    const knownIdsRef = useRef(new Set());
+    // Audio playback state
+    const [playingId, setPlayingId]       = useState(null);  // memory id currently playing
+    const soundRef                         = useRef(null);
+
+    const knownIdsRef  = useRef(new Set());
+    const latestIdRef  = useRef(0);          // highest id seen (for after_id polling)
     const pollTimerRef = useRef(null);
 
-    // ── Fetch ─────────────────────────────────────────────────
-    const fetchMemories = async (silent = false) => {
+    // ── Fetch memories ─────────────────────────────────────────────
+    const fetchMemories = useCallback(async (silent = false) => {
         try {
             const userId = await AsyncStorage.getItem('user_id');
             let url = `${AI_URL}/api/memories?limit=50`;
@@ -47,25 +56,22 @@ export default function VoiceHistory() {
             const data = await response.json();
             const list = Array.isArray(data) ? data : data.memories || [];
 
-            // Detect new memories (compare IDs)
+            // Track new IDs for flash highlight
             const fresh = new Set();
             for (const m of list) {
                 if (m.id != null && !knownIdsRef.current.has(m.id)) {
                     fresh.add(m.id);
+                    if (m.id > latestIdRef.current) latestIdRef.current = m.id;
                 }
             }
-
-            // Update known IDs
             knownIdsRef.current = new Set(list.map(m => m.id).filter(x => x != null));
 
-            // Only flash if we already loaded once (skip first load)
             if (!silent && fresh.size > 0 && memories.length > 0) {
                 setNewIds(prev => {
                     const next = new Set(prev);
                     fresh.forEach(id => next.add(id));
                     return next;
                 });
-                // Auto-clear flash after a moment
                 setTimeout(() => {
                     setNewIds(prev => {
                         const next = new Set(prev);
@@ -82,27 +88,24 @@ export default function VoiceHistory() {
             setLoading(false);
             setRefreshing(false);
         }
-    };
+    }, [memories.length]);
 
-    // ── Polling loop ─────────────────────────────────────────
+    // ── Polling loop ──────────────────────────────────────────────
     useEffect(() => {
-        fetchMemories(true); // first load (silent — don't flash)
-        // (re-)start poll loop whenever streaming flag changes
+        fetchMemories(true);
         if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         const interval = streaming ? POLL_LIVE_MS : POLL_IDLE_MS;
         pollTimerRef.current = setInterval(() => fetchMemories(false), interval);
-        return () => {
-            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-        };
+        return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
     }, [streaming]);
 
-    // ── Pull-to-refresh ──────────────────────────────────────
+    // ── Pull-to-refresh ───────────────────────────────────────────
     const onRefresh = useCallback(() => {
         setRefreshing(true);
         fetchMemories(true);
     }, []);
 
-    // ── Live stream toggle ───────────────────────────────────
+    // ── Live stream toggle ────────────────────────────────────────
     const toggleStream = async () => {
         const endpoint = streaming ? 'stop' : 'start';
         try {
@@ -118,7 +121,7 @@ export default function VoiceHistory() {
         }
     };
 
-    // ── 5s manual recording ──────────────────────────────────
+    // ── 5s manual recording ───────────────────────────────────────
     const handleReRecord = async () => {
         if (reRecordStatus === 'recording') return;
         setReRecordStatus('recording');
@@ -126,10 +129,7 @@ export default function VoiceHistory() {
             const res = await fetch(`${AI_URL}/api/bracelet/record`, { method: 'POST' });
             if (res.ok) {
                 setReRecordStatus('done');
-                setTimeout(() => {
-                    setReRecordStatus('idle');
-                    fetchMemories(false);
-                }, 6000);
+                setTimeout(() => { setReRecordStatus('idle'); fetchMemories(false); }, 6000);
             } else {
                 setReRecordStatus('error');
                 setTimeout(() => setReRecordStatus('idle'), 3000);
@@ -138,11 +138,59 @@ export default function VoiceHistory() {
         } catch (e) {
             setReRecordStatus('error');
             setTimeout(() => setReRecordStatus('idle'), 3000);
-            Alert.alert('Re-record', 'Could not reach the Memonic server.');
         }
     };
 
-    // ── Render row ───────────────────────────────────────────
+    // ── Audio playback ────────────────────────────────────────────
+    const stopAudio = async () => {
+        if (soundRef.current) {
+            try { await soundRef.current.stopAsync(); await soundRef.current.unloadAsync(); } catch {}
+            soundRef.current = null;
+        }
+        setPlayingId(null);
+    };
+
+    const handlePlayAudio = async (item) => {
+        // If same item tapped — stop
+        if (playingId === item.id) {
+            await stopAudio();
+            return;
+        }
+        // Stop any existing playback first
+        await stopAudio();
+
+        if (!item.audio_path) {
+            Alert.alert('No audio', 'This memory has no saved audio file.');
+            return;
+        }
+
+        try {
+            await Audio.setAudioModeAsync({ playsInSilentModeIOS: true });
+            const { sound } = await Audio.Sound.createAsync(
+                { uri: `${AI_URL}/api/audio/${item.audio_path}` },
+                { shouldPlay: true }
+            );
+            soundRef.current = sound;
+            setPlayingId(item.id);
+            sound.setOnPlaybackStatusUpdate(status => {
+                if (status.didJustFinish) {
+                    soundRef.current = null;
+                    setPlayingId(null);
+                }
+            });
+        } catch (e) {
+            console.error('Audio play error:', e);
+            Alert.alert('Playback Error', 'Could not play this audio file.');
+            setPlayingId(null);
+        }
+    };
+
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => { stopAudio(); };
+    }, []);
+
+    // ── Render row ────────────────────────────────────────────────
     const renderItem = ({ item }) => {
         const time = item.timestamp
             ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -150,7 +198,8 @@ export default function VoiceHistory() {
         const speaker = (item.speaker && item.speaker !== 'Unknown' && item.speaker !== 'unknown')
             ? item.speaker : 'Unknown';
         const emotion = item.emotion || 'Neutral';
-        const isNew = newIds.has(item.id);
+        const isNew     = newIds.has(item.id);
+        const isPlaying = playingId === item.id;
 
         return (
             <View style={[styles.historyCard, isNew && styles.newCard]}>
@@ -163,8 +212,28 @@ export default function VoiceHistory() {
                     <Text style={styles.timeText}>{time}</Text>
                     <Text style={styles.speakerText}>{speaker}:</Text>
                     <Text style={[styles.emotionBadge, emotionColor(emotion)]}>{emotion}</Text>
+
+                    {/* Play / Stop button */}
+                    <TouchableOpacity
+                        onPress={() => handlePlayAudio(item)}
+                        style={[styles.playBtn, isPlaying && styles.playBtnActive]}
+                    >
+                        <Ionicons
+                            name={isPlaying ? 'stop' : 'play'}
+                            size={13}
+                            color={isPlaying ? '#fff' : COLORS.accent}
+                        />
+                    </TouchableOpacity>
                 </View>
                 <Text style={styles.transcriptText}>{item.transcript || 'No transcript'}</Text>
+
+                {/* Mini playing indicator */}
+                {isPlaying && (
+                    <View style={styles.playingBadge}>
+                        <View style={styles.playingDot} />
+                        <Text style={styles.playingText}>Playing…</Text>
+                    </View>
+                )}
             </View>
         );
     };
@@ -183,7 +252,16 @@ export default function VoiceHistory() {
                 </TouchableOpacity>
                 <Text style={styles.headerTitle}>Voice History</Text>
 
-                {/* Live stream toggle */}
+                {/* Enroll button */}
+                <TouchableOpacity
+                    onPress={() => setEnrollSheetVisible(true)}
+                    style={styles.enrollBtn}
+                >
+                    <Ionicons name="person-add-outline" size={16} color={COLORS.accent} />
+                    <Text style={styles.enrollText}>Enroll</Text>
+                </TouchableOpacity>
+
+                {/* Live toggle */}
                 <TouchableOpacity
                     onPress={toggleStream}
                     style={[styles.streamBtn, streaming && styles.streamBtnActive]}
@@ -195,7 +273,7 @@ export default function VoiceHistory() {
                 </TouchableOpacity>
             </View>
 
-            {/* Relay status banner — shows phone IP for ESP32 config */}
+            {/* Relay status */}
             <View style={styles.relayBanner}>
                 <View style={[styles.relayDot, {
                     backgroundColor: (relay?.udpReady && relay?.wsReady) ? '#34c759' : COLORS.danger,
@@ -204,21 +282,19 @@ export default function VoiceHistory() {
                     Phone IP: {relay?.phoneIP || '—'}:{relay?.udpListenPort || 5005}  •
                     UDP {relay?.udpReady ? 'ON' : 'OFF'}  •
                     WSS {relay?.wsReady ? 'ON' : 'OFF'}
-                    {relay?.esp32Addr ? `  •  ESP32: ${relay.esp32Addr.ip}` : '  •  no ESP32 yet'}
+                    {relay?.esp32Addr ? `  •  ESP32: ${relay.esp32Addr.ip}` : '  •  no ESP32'}
                 </Text>
             </View>
 
-            {/* Live stream banner */}
+            {/* Live banner */}
             {streaming && (
                 <View style={styles.liveBanner}>
                     <View style={styles.liveBannerDot} />
-                    <Text style={styles.liveBannerText}>
-                        Streaming • new memories appear automatically
-                    </Text>
+                    <Text style={styles.liveBannerText}>Streaming • new memories appear automatically</Text>
                 </View>
             )}
 
-            {/* Re-record button (only when not streaming) */}
+            {/* Re-record (idle mode) */}
             {!streaming && (
                 <View style={styles.subHeader}>
                     <TouchableOpacity
@@ -279,6 +355,12 @@ export default function VoiceHistory() {
                     )}
                 </View>
             )}
+
+            {/* Enroll sheet */}
+            <AddMemberSheet
+                visible={enrollSheetVisible}
+                onClose={() => setEnrollSheetVisible(false)}
+            />
         </View>
     );
 }
@@ -288,7 +370,7 @@ const styles = StyleSheet.create({
 
     header: {
         marginTop: 60, paddingHorizontal: 24, marginBottom: 12,
-        flexDirection: 'row', alignItems: 'center', gap: 12,
+        flexDirection: 'row', alignItems: 'center', gap: 10,
     },
     pillButton: {
         width: 44, height: 44, borderRadius: 22,
@@ -296,42 +378,40 @@ const styles = StyleSheet.create({
         ...SHADOWS.button,
     },
     headerTitle: {
-        flex: 1, color: COLORS.text, fontSize: 24,
-        fontFamily: 'Garamond-Bold', fontWeight: 'bold', textAlign: 'center',
+        flex: 1, color: COLORS.text, fontSize: 22,
+        fontFamily: 'Garamond-Bold', fontWeight: 'bold',
     },
+    enrollBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        backgroundColor: COLORS.accentSoft, borderRadius: 16,
+        paddingHorizontal: 12, paddingVertical: 8,
+    },
+    enrollText: { color: COLORS.accent, fontSize: 13, fontWeight: '600' },
 
-    // Live stream toggle
     streamBtn: {
         flexDirection: 'row', alignItems: 'center', gap: 6,
         backgroundColor: COLORS.surface, borderRadius: 20,
         paddingHorizontal: 14, paddingVertical: 10, ...SHADOWS.button,
     },
     streamBtnActive: { backgroundColor: COLORS.danger },
-    liveDot: {
-        width: 8, height: 8, borderRadius: 4,
-        backgroundColor: COLORS.textMuted,
-    },
+    liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.textMuted },
     liveDotActive: { backgroundColor: '#fff' },
     streamText: { color: COLORS.accent, fontSize: 13, fontWeight: '700', letterSpacing: 0.8 },
 
-    // Relay banner
     relayBanner: {
         marginHorizontal: 24, marginBottom: 8, paddingHorizontal: 12, paddingVertical: 7,
-        backgroundColor: COLORS.surfaceDeep || COLORS.surface, borderRadius: 10,
+        backgroundColor: COLORS.surfaceDeep, borderRadius: 10,
         flexDirection: 'row', alignItems: 'center', gap: 8,
     },
     relayDot: { width: 7, height: 7, borderRadius: 4 },
     relayText: { color: COLORS.textMuted, fontSize: 11, flex: 1 },
 
-    // Live banner
     liveBanner: {
         marginHorizontal: 24, marginBottom: 12, paddingHorizontal: 14, paddingVertical: 8,
         backgroundColor: 'rgba(255, 69, 58, 0.10)', borderRadius: 14,
         flexDirection: 'row', alignItems: 'center', gap: 8,
     },
-    liveBannerDot: {
-        width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.danger,
-    },
+    liveBannerDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.danger },
     liveBannerText: { color: COLORS.danger, fontSize: 12, fontWeight: '600' },
 
     subHeader: { paddingHorizontal: 24, marginBottom: 12, alignItems: 'flex-end' },
@@ -346,35 +426,37 @@ const styles = StyleSheet.create({
 
     historyCard: {
         backgroundColor: COLORS.surface, borderRadius: 20, padding: 16,
-        marginBottom: 10, ...SHADOWS.card,
-        position: 'relative',
+        marginBottom: 10, ...SHADOWS.card, position: 'relative',
     },
     newCard: {
-        borderWidth: 1.5,
-        borderColor: COLORS.accent,
+        borderWidth: 1.5, borderColor: COLORS.accent,
         backgroundColor: 'rgba(232, 115, 74, 0.08)',
     },
     newBadge: {
         position: 'absolute', top: -7, right: 12,
-        backgroundColor: COLORS.accent, paddingHorizontal: 8, paddingVertical: 2,
-        borderRadius: 8,
+        backgroundColor: COLORS.accent, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8,
     },
     newBadgeText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 1 },
 
     rowTop: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
-    timeText: {
-        color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Bold',
-        fontWeight: '600', minWidth: 50,
+    timeText: { color: COLORS.accent, fontSize: 13, fontFamily: 'Garamond-Bold', fontWeight: '600', minWidth: 50 },
+    speakerText: { color: COLORS.text, fontSize: 14, fontFamily: 'Garamond-Bold', fontWeight: '700' },
+    emotionBadge: { fontSize: 12, fontFamily: 'Garamond-Regular', fontWeight: '600' },
+
+    playBtn: {
+        marginLeft: 'auto', width: 28, height: 28, borderRadius: 9,
+        backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
     },
-    speakerText: {
-        color: COLORS.text, fontSize: 14, fontFamily: 'Garamond-Bold', fontWeight: '700',
-    },
-    emotionBadge: {
-        marginLeft: 'auto', fontSize: 12, fontFamily: 'Garamond-Regular', fontWeight: '600',
-    },
+    playBtnActive: { backgroundColor: COLORS.accent },
+
     transcriptText: {
         color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular', lineHeight: 20,
     },
+    playingBadge: {
+        flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8,
+    },
+    playingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.accent },
+    playingText: { color: COLORS.accent, fontSize: 11, fontWeight: '600' },
 
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 },
     emptyIconWrap: {

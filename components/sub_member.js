@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { Audio } from 'expo-av';
 import { AI_URL } from '../constants/config';
 
 const C = {
@@ -18,71 +18,37 @@ const C = {
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.82;
-const RECORD_SECONDS = 3; // ตรงกับ ESP32 ENROLL_RECORD_SECONDS
-
-import { useMemonicBLE } from '../hooks/useMemonicBLE';
+const RECORD_SECONDS = 4;   // seconds to record per sample
 
 export default function AddMemberSheet({ visible, onClose }) {
-    // ✅ Fix #1: เพิ่ม reconnect เข้า destructure
-    const {
-        isConnected,
-        isReceiving: isBLEReceiving,
-        lastMemory,
-        sendEnrollCommand,
-        sendResetCommand,
-        setAutoRecordEnabled,
-        reconnect,
-    } = useMemonicBLE();
+    const slideAnim  = useRef(new Animated.Value(SHEET_HEIGHT)).current;
+    const pulseAnim  = useRef(new Animated.Value(1)).current;
+    const glowAnim   = useRef(new Animated.Value(0)).current;
 
-    const router = useRouter();
-    const slideAnim = useRef(new Animated.Value(SHEET_HEIGHT)).current;
-    const pulseAnim = useRef(new Animated.Value(1)).current;
-    const glowAnim = useRef(new Animated.Value(0)).current;
+    const [memberName, setMemberName]       = useState('');
+    const [phase, setPhase]                 = useState('idle');  // idle | recording | processing | done | error
+    const [elapsed, setElapsed]             = useState(0);
+    const [resultMsg, setResultMsg]         = useState('');
+    const [sampleCount, setSampleCount]     = useState(0);
 
-    const [memberName, setMemberName] = useState('');
-    const [recordingDone, setRecordingDone] = useState(false);
-    const [elapsed, setElapsed] = useState(0);
-    const [enrolling, setEnrolling] = useState(false);
+    const recordingRef  = useRef(null);
+    const timerRef      = useRef(null);
 
-    const timerRef = useRef(null);
-
-    // ── Sheet open/close ──────────────────────────────────────
+    // ── Sheet animation ────────────────────────────────────────────
     useEffect(() => {
         if (visible) {
             Animated.spring(slideAnim, {
                 toValue: 0, useNativeDriver: true, bounciness: 4, speed: 14,
             }).start();
-            if (isConnected) setAutoRecordEnabled(false);
         } else {
             slideAnim.setValue(SHEET_HEIGHT);
             resetState();
-            if (isConnected) setAutoRecordEnabled(true);
         }
-    }, [visible, isConnected]);
+    }, [visible]);
 
-    // ── Track BLE recording state ─────────────────────────────
-    // ✅ Fix #2: isBLEReceiving ตอนนี้เป็นค่าจริงจาก BLEContext แล้ว
-    const prevReceiving = useRef(false);
+    // ── Pulse animation while recording ───────────────────────────
     useEffect(() => {
-        if (isBLEReceiving) {
-            // ESP32 เริ่มอัดแล้ว → เริ่มจับเวลา
-            setRecordingDone(false);
-            setElapsed(0);
-            if (timerRef.current) clearInterval(timerRef.current);
-            timerRef.current = setInterval(() => {
-                setElapsed(prev => prev + 1);
-            }, 1000);
-        } else if (prevReceiving.current) {
-            // เพิ่งหยุดอัด → mark done
-            setRecordingDone(true);
-            if (timerRef.current) clearInterval(timerRef.current);
-        }
-        prevReceiving.current = isBLEReceiving;
-    }, [isBLEReceiving]);
-
-    // ── Pulse animation while recording ──────────────────────
-    useEffect(() => {
-        if (!isBLEReceiving) return;
+        if (phase !== 'recording') return;
         const pulse = Animated.loop(Animated.sequence([
             Animated.timing(pulseAnim, { toValue: 1.25, duration: 700, useNativeDriver: true }),
             Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
@@ -93,18 +59,19 @@ export default function AddMemberSheet({ visible, onClose }) {
         ]));
         pulse.start();
         glow.start();
-        return () => {
-            pulse.stop(); glow.stop();
-            pulseAnim.setValue(1); glowAnim.setValue(0);
-        };
-    }, [isBLEReceiving]);
+        return () => { pulse.stop(); glow.stop(); pulseAnim.setValue(1); glowAnim.setValue(0); };
+    }, [phase]);
 
-    // ── Helpers ───────────────────────────────────────────────
     const resetState = () => {
-        setRecordingDone(false);
+        setPhase('idle');
         setElapsed(0);
-        setEnrolling(false);
+        setResultMsg('');
         if (timerRef.current) clearInterval(timerRef.current);
+        // Stop any ongoing recording
+        if (recordingRef.current) {
+            recordingRef.current.stopAndUnloadAsync().catch(() => {});
+            recordingRef.current = null;
+        }
     };
 
     const handleClose = () => {
@@ -112,70 +79,108 @@ export default function AddMemberSheet({ visible, onClose }) {
             .start(() => onClose());
     };
 
-    // ── Mic button ────────────────────────────────────────────
+    // ── Record via phone mic ───────────────────────────────────────
     const handleMicPress = async () => {
-        if (!isConnected) {
-            reconnect();
-            Alert.alert(
-                'Bracelet Offline',
-                'Your Memonic bracelet is not connected to the server. Make sure it is powered on and on the same WiFi.'
-            );
-            return;
-        }
-
+        if (phase === 'recording') return;
         if (!memberName.trim()) {
             Alert.alert('Missing name', 'Please enter a member name first.');
             return;
         }
 
-        if (isBLEReceiving) return; // กำลังอัดอยู่ ไม่ต้องทำอะไร
+        // Request mic permission
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission denied', 'Microphone access is required to enroll a voice.');
+            return;
+        }
 
-        // ส่งคำสั่งให้ ESP32 อัด 3s แล้วส่งไป backend
-        resetState();
-        sendEnrollCommand(memberName.trim());
+        setPhase('recording');
+        setElapsed(0);
+        setResultMsg('');
+
+        // Set audio mode for recording
+        await Audio.setAudioModeAsync({
+            allowsRecordingIOS: true,
+            playsInSilentModeIOS: true,
+        });
+
+        try {
+            const { recording } = await Audio.Recording.createAsync(
+                Audio.RecordingOptionsPresets.HIGH_QUALITY
+            );
+            recordingRef.current = recording;
+
+            // Live countdown timer
+            if (timerRef.current) clearInterval(timerRef.current);
+            timerRef.current = setInterval(() => {
+                setElapsed(prev => prev + 1);
+            }, 1000);
+
+            // Auto-stop after RECORD_SECONDS
+            setTimeout(async () => {
+                if (timerRef.current) clearInterval(timerRef.current);
+                await finishRecording();
+            }, RECORD_SECONDS * 1000);
+
+        } catch (e) {
+            console.error('Recording start error:', e);
+            setPhase('error');
+            setResultMsg('Could not start recording.');
+        }
     };
 
-    // ── Add Member button ─────────────────────────────────────
-    const handleAddMember = async () => {
-        if (!memberName.trim()) {
-            Alert.alert('Missing name', 'Please enter a member name.');
-            return;
-        }
+    const finishRecording = async () => {
+        const rec = recordingRef.current;
+        if (!rec) return;
 
-        if (isBLEReceiving) {
-            Alert.alert('Processing', 'Please wait for the recording to complete.');
-            return;
-        }
+        setPhase('processing');
+        try {
+            await rec.stopAndUnloadAsync();
+            recordingRef.current = null;
 
-        if (!recordingDone) {
-            Alert.alert('No voice', 'Please record your voice first.');
-            return;
-        }
+            await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
 
-        // ✅ Fix #3: lastMemory ตอนนี้รับค่าจาก ESP32 ตรงๆ ไม่มี ':' filter
-        if (lastMemory?.includes("SUCCESS")) {
-            Alert.alert('Success! 🎉', `${memberName} has been enrolled.`);
-            resetState();
-            setMemberName('');
-            handleClose();
-        } else if (lastMemory?.startsWith("ERROR")) {
-            Alert.alert('Failed', `Enrollment error: ${lastMemory}`);
-            resetState();
-        } else {
-            // ยังรอ response อยู่
-            Alert.alert('Processing', 'Voice profile is still being processed. Please wait.');
+            const uri = rec.getURI();
+            if (!uri) throw new Error('No recording URI');
+
+            // Convert to base64
+            const { FileSystem } = await import('expo-file-system');
+            const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+
+            // Send to backend
+            const res = await fetch(`${AI_URL}/api/enroll`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: memberName.trim(),
+                    audio_base_64: base64,
+                    file_ext: '.m4a',
+                }),
+            });
+
+            const data = await res.json();
+            if (res.ok && data.status === 'ok') {
+                const newCount = sampleCount + 1;
+                setSampleCount(newCount);
+                setPhase('done');
+                setResultMsg(`Sample ${newCount} enrolled ✓`);
+            } else {
+                throw new Error(data.detail || data.message || 'Enrollment failed');
+            }
+        } catch (e) {
+            console.error('Enrollment error:', e);
+            setPhase('error');
+            setResultMsg(`Error: ${e.message}`);
         }
     };
 
-    // ── UI helpers ────────────────────────────────────────────
+    const enrolledOK  = phase === 'done';
+    const isRecording = phase === 'recording';
+    const isProcessing = phase === 'processing';
+
     const timerProgress = Math.min(elapsed / RECORD_SECONDS, 1);
     const formatTime = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-    const enrolledOK = recordingDone && lastMemory?.includes("SUCCESS");
-    const isWaitingForBLE = isConnected && recordingDone && !enrolledOK && !lastMemory?.startsWith("ERROR");
-    const isProcessing = enrolling || isWaitingForBLE;
-
-    // ── Render ────────────────────────────────────────────────
     return (
         <Modal visible={visible} transparent animationType="none" onRequestClose={handleClose}>
             <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -191,20 +196,12 @@ export default function AddMemberSheet({ visible, onClose }) {
                             </View>
                             <View>
                                 <Text style={styles.sheetTitle}>Add Member</Text>
-                                <Text style={styles.sheetSubtitle}>Enroll a new voice profile</Text>
+                                <Text style={styles.sheetSubtitle}>Record voice with your phone mic</Text>
                             </View>
                         </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <View style={[styles.connBadge, { backgroundColor: isConnected ? C.successSoft : C.dangerSoft }]}>
-                                <View style={[styles.connDot, { backgroundColor: isConnected ? C.success : C.danger }]} />
-                                <Text style={[styles.connText, { color: isConnected ? C.success : C.danger }]}>
-                                    {isConnected ? 'Connected' : 'Disconnected'}
-                                </Text>
-                            </View>
-                            <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
-                                <Ionicons name="close" size={18} color={C.textMuted} />
-                            </TouchableOpacity>
-                        </View>
+                        <TouchableOpacity onPress={handleClose} style={styles.closeBtn}>
+                            <Ionicons name="close" size={18} color={C.textMuted} />
+                        </TouchableOpacity>
                     </View>
 
                     <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
@@ -222,7 +219,7 @@ export default function AddMemberSheet({ visible, onClose }) {
                                     placeholderTextColor={C.textMuted}
                                     value={memberName}
                                     onChangeText={setMemberName}
-                                    editable={!isBLEReceiving}
+                                    editable={!isRecording && !isProcessing}
                                 />
                             </View>
                         </View>
@@ -232,12 +229,17 @@ export default function AddMemberSheet({ visible, onClose }) {
                             <View style={styles.sectionHeader}>
                                 <Ionicons name="mic-outline" size={16} color={C.icon} />
                                 <Text style={styles.sectionLabel}>VOICE ENROLLMENT</Text>
+                                {sampleCount > 0 && (
+                                    <View style={styles.sampleBadge}>
+                                        <Text style={styles.sampleBadgeText}>{sampleCount} sample{sampleCount > 1 ? 's' : ''}</Text>
+                                    </View>
+                                )}
                             </View>
 
                             <View style={styles.voiceContainer}>
                                 {/* Mic button */}
                                 <View style={styles.micArea}>
-                                    {isBLEReceiving && (
+                                    {isRecording && (
                                         <Animated.View style={[styles.pulseRing, {
                                             transform: [{ scale: pulseAnim }],
                                             opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 0.1] }),
@@ -246,27 +248,27 @@ export default function AddMemberSheet({ visible, onClose }) {
                                     <TouchableOpacity
                                         style={[
                                             styles.voiceButton,
-                                            isBLEReceiving && { backgroundColor: C.danger },
+                                            isRecording && { backgroundColor: C.danger },
                                             enrolledOK && { backgroundColor: C.success },
-                                            !isBLEReceiving && !enrolledOK && { backgroundColor: C.surfaceDeep },
+                                            isProcessing && { backgroundColor: C.accent },
+                                            !isRecording && !enrolledOK && !isProcessing && { backgroundColor: C.surfaceDeep },
                                         ]}
                                         onPress={handleMicPress}
                                         activeOpacity={0.7}
-                                        disabled={isBLEReceiving}
+                                        disabled={isRecording || isProcessing}
                                     >
                                         <Ionicons
-                                            name={isBLEReceiving ? 'stop' : enrolledOK ? 'checkmark-circle' : 'mic'}
-                                            size={isBLEReceiving ? 26 : enrolledOK ? 30 : 28}
-                                            color={isBLEReceiving || enrolledOK ? '#fff' : C.icon}
+                                            name={isRecording ? 'stop' : isProcessing ? 'sync' : enrolledOK ? 'checkmark-circle' : 'mic'}
+                                            size={28}
+                                            color={(isRecording || enrolledOK || isProcessing) ? '#fff' : C.icon}
                                         />
                                     </TouchableOpacity>
                                 </View>
 
                                 {/* Status area */}
                                 <View style={styles.voiceStatus}>
-
                                     {/* Idle */}
-                                    {!isBLEReceiving && !recordingDone && (
+                                    {phase === 'idle' && (
                                         <View>
                                             <Text style={styles.voicePromptTitle}>Record Reference Voice</Text>
                                             <Text style={styles.voicePromptBody}>Tap mic and say:</Text>
@@ -274,11 +276,12 @@ export default function AddMemberSheet({ visible, onClose }) {
                                                 <Ionicons name="chatbubble-ellipses-outline" size={14} color={C.accent} style={{ marginRight: 8, marginTop: 2 }} />
                                                 <Text style={styles.quoteText}>"Hi one two three, I am so happy to see you"</Text>
                                             </View>
+                                            <Text style={styles.hintText}>🔁 Record multiple times for better accuracy</Text>
                                         </View>
                                     )}
 
                                     {/* Recording */}
-                                    {isBLEReceiving && (
+                                    {isRecording && (
                                         <View>
                                             <View style={styles.recordingBadge}>
                                                 <View style={styles.recordingDot} />
@@ -297,64 +300,59 @@ export default function AddMemberSheet({ visible, onClose }) {
                                         </View>
                                     )}
 
+                                    {/* Processing */}
+                                    {isProcessing && (
+                                        <View>
+                                            <Text style={styles.voicePromptTitle}>Processing…</Text>
+                                            <Text style={styles.voicePromptBody}>Sending to server</Text>
+                                        </View>
+                                    )}
+
                                     {/* Done */}
-                                    {recordingDone && !isBLEReceiving && (
+                                    {(enrolledOK || phase === 'error') && (
                                         <View>
                                             <View style={styles.doneBadge}>
                                                 <Ionicons
-                                                    name={enrolledOK ? "checkmark-circle" : lastMemory?.startsWith("ERROR") ? "close-circle" : "sync-outline"}
+                                                    name={enrolledOK ? 'checkmark-circle' : 'close-circle'}
                                                     size={16}
-                                                    color={enrolledOK ? C.success : lastMemory?.startsWith("ERROR") ? C.danger : C.accent}
+                                                    color={enrolledOK ? C.success : C.danger}
                                                 />
-                                                <Text style={[
-                                                    styles.doneBadgeText,
-                                                    !enrolledOK && { color: lastMemory?.startsWith("ERROR") ? C.danger : C.accent }
-                                                ]}>
-                                                    {enrolledOK
-                                                        ? "Voice Enrolled"
-                                                        : lastMemory?.startsWith("ERROR")
-                                                            ? lastMemory
-                                                            : "Processing..."}
+                                                <Text style={[styles.doneBadgeText, !enrolledOK && { color: C.danger }]}>
+                                                    {resultMsg}
                                                 </Text>
                                             </View>
-                                            <Text style={styles.doneDetail}>
-                                                {enrolledOK
-                                                    ? `Profile for "${memberName}" is ready`
-                                                    : lastMemory?.startsWith("ERROR")
-                                                        ? "Tap mic to try again"
-                                                        : "Sending to server..."}
-                                            </Text>
-                                            {(enrolledOK || lastMemory?.startsWith("ERROR")) && (
-                                                <TouchableOpacity style={styles.reRecordBtn} onPress={handleMicPress}>
-                                                    <Ionicons name="refresh" size={14} color={C.icon} />
-                                                    <Text style={styles.reRecordText}>Re-record</Text>
-                                                </TouchableOpacity>
-                                            )}
+                                            <TouchableOpacity
+                                                style={styles.reRecordBtn}
+                                                onPress={() => setPhase('idle')}
+                                            >
+                                                <Ionicons name="refresh" size={14} color={C.icon} />
+                                                <Text style={styles.reRecordText}>Record another sample</Text>
+                                            </TouchableOpacity>
                                         </View>
                                     )}
                                 </View>
                             </View>
                         </View>
 
-                        {/* Add Member button */}
-                        <TouchableOpacity
-                            style={[styles.addButton, isProcessing && { opacity: 0.6 }]}
-                            onPress={handleAddMember}
-                            disabled={isProcessing}
-                            activeOpacity={0.85}
-                        >
-                            <View style={styles.addButtonInner}>
-                                <Ionicons
-                                    name={isProcessing ? "sync" : "person-add"}
-                                    size={18}
-                                    color="#fff"
-                                    style={{ marginRight: 8 }}
-                                />
-                                <Text style={styles.addButtonText}>
-                                    {enrolling ? 'Enrolling...' : isWaitingForBLE ? 'Processing Voice...' : 'Add Member'}
-                                </Text>
-                            </View>
-                        </TouchableOpacity>
+                        {/* Confirm Add */}
+                        {sampleCount > 0 && (
+                            <TouchableOpacity
+                                style={styles.addButton}
+                                onPress={() => {
+                                    Alert.alert('Success! 🎉', `${memberName} enrolled with ${sampleCount} sample${sampleCount > 1 ? 's' : ''}.`);
+                                    resetState();
+                                    setMemberName('');
+                                    setSampleCount(0);
+                                    handleClose();
+                                }}
+                                activeOpacity={0.85}
+                            >
+                                <View style={styles.addButtonInner}>
+                                    <Ionicons name="person-add" size={18} color="#fff" style={{ marginRight: 8 }} />
+                                    <Text style={styles.addButtonText}>Save Member</Text>
+                                </View>
+                            </TouchableOpacity>
+                        )}
 
                         <View style={{ height: 30 }} />
                     </ScrollView>
@@ -374,9 +372,6 @@ const styles = StyleSheet.create({
     },
     handleBar: { width: 36, height: 4, borderRadius: 2, backgroundColor: C.surfaceDeep, alignSelf: 'center', marginTop: 10, marginBottom: 18 },
     sheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-    connBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12, marginRight: 10 },
-    connDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-    connText: { fontSize: 12, fontWeight: 'bold' },
     headerLeft: { flexDirection: 'row', alignItems: 'center' },
     headerIconWrap: {
         width: 40, height: 40, borderRadius: 14, backgroundColor: C.accent,
@@ -386,23 +381,33 @@ const styles = StyleSheet.create({
     sheetTitle: { color: C.text, fontSize: 20, fontWeight: 'bold' },
     sheetSubtitle: { color: C.textMuted, fontSize: 13, marginTop: 1 },
     closeBtn: { width: 34, height: 34, borderRadius: 12, backgroundColor: C.surface, justifyContent: 'center', alignItems: 'center' },
+
     sectionCard: {
         backgroundColor: C.surface, borderRadius: 22, padding: 18, marginBottom: 16,
         shadowColor: C.shadowDark, shadowOffset: { width: 4, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 6,
     },
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
-    sectionLabel: { color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 8 },
+    sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14, gap: 8 },
+    sectionLabel: { color: C.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 1.2, flex: 1 },
+    sampleBadge: {
+        backgroundColor: C.successSoft, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 3,
+    },
+    sampleBadgeText: { color: C.success, fontSize: 11, fontWeight: '700' },
+
     inputBox: { backgroundColor: C.surfaceDeep, borderRadius: 16, overflow: 'hidden' },
     sheetInput: { padding: 15, color: C.text, fontSize: 16 },
+
     voiceContainer: { flexDirection: 'row', alignItems: 'flex-start' },
     micArea: { position: 'relative', justifyContent: 'center', alignItems: 'center', width: 72, height: 72 },
     pulseRing: { position: 'absolute', width: 72, height: 72, borderRadius: 36, backgroundColor: C.danger },
     voiceButton: { width: 60, height: 60, borderRadius: 22, justifyContent: 'center', alignItems: 'center' },
     voiceStatus: { flex: 1, marginLeft: 16, justifyContent: 'center' },
+
     voicePromptTitle: { color: C.text, fontSize: 15, fontWeight: '600', marginBottom: 4 },
     voicePromptBody: { color: C.textMuted, fontSize: 13, marginBottom: 8 },
-    quoteCard: { flexDirection: 'row', backgroundColor: C.accentSoft, borderRadius: 14, padding: 12 },
+    quoteCard: { flexDirection: 'row', backgroundColor: C.accentSoft, borderRadius: 14, padding: 12, marginBottom: 8 },
     quoteText: { color: C.accent, fontSize: 13, fontStyle: 'italic', flex: 1, lineHeight: 18 },
+    hintText: { color: C.textMuted, fontSize: 12, marginTop: 4 },
+
     recordingBadge: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
     recordingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.danger, marginRight: 6 },
     recordingBadgeText: { color: C.danger, fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.8 },
@@ -410,15 +415,22 @@ const styles = StyleSheet.create({
     timerMax: { color: C.textMuted, fontSize: 14, fontWeight: 'normal' },
     progressTrack: { height: 6, backgroundColor: C.surfaceDeep, borderRadius: 3, overflow: 'hidden' },
     progressFill: { height: '100%', borderRadius: 3 },
-    doneBadge: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
-    doneBadgeText: { color: C.success, fontSize: 15, fontWeight: '600', marginLeft: 6 },
-    doneDetail: { color: C.textMuted, fontSize: 13, marginBottom: 10 },
-    reRecordBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.surfaceDeep },
-    reRecordText: { color: C.text, fontSize: 13, marginLeft: 5 },
+
+    doneBadge: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 6 },
+    doneBadgeText: { color: C.success, fontSize: 15, fontWeight: '600' },
+    reRecordBtn: {
+        flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start',
+        paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, backgroundColor: C.surfaceDeep, gap: 5,
+    },
+    reRecordText: { color: C.text, fontSize: 13 },
+
     addButton: {
         borderRadius: 20, overflow: 'hidden',
         shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12, elevation: 10,
     },
-    addButtonInner: { backgroundColor: C.accent, paddingVertical: 16, alignItems: 'center', borderRadius: 20, flexDirection: 'row', justifyContent: 'center' },
+    addButtonInner: {
+        backgroundColor: C.accent, paddingVertical: 16, alignItems: 'center',
+        borderRadius: 20, flexDirection: 'row', justifyContent: 'center',
+    },
     addButtonText: { color: '#fff', fontSize: 17, fontWeight: 'bold' },
 });
