@@ -1,6 +1,6 @@
 import {
     Text, View, StyleSheet, TouchableOpacity, FlatList, RefreshControl,
-    ActivityIndicator, Alert, Animated
+    ActivityIndicator, Alert, Animated, TextInput, Modal
 } from 'react-native';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Ionicons } from '@expo/vector-icons';
@@ -33,7 +33,8 @@ export default function VoiceHistory() {
     const [refreshing, setRefreshing]         = useState(false);
     const [loading, setLoading]               = useState(true);
     const [reRecordStatus, setReRecordStatus] = useState('idle');
-    const [streaming, setStreaming]           = useState(false);
+    // streaming state comes from RelayContext (auto-starts when ESP32 connects)
+    const [streaming, setStreaming]           = useState(relay?.streaming ?? false);
     const [newIds, setNewIds]                 = useState(new Set());
     const [enrollSheetVisible, setEnrollSheetVisible] = useState(false);
 
@@ -89,6 +90,11 @@ export default function VoiceHistory() {
             setRefreshing(false);
         }
     }, [memories.length]);
+
+    // ── Sync streaming state from RelayContext (auto-starts when ESP32 connects) ──
+    useEffect(() => {
+        if (relay?.streaming !== undefined) setStreaming(relay.streaming);
+    }, [relay?.streaming]);
 
     // ── Polling loop ──────────────────────────────────────────────
     useEffect(() => {
@@ -190,6 +196,62 @@ export default function VoiceHistory() {
         return () => { stopAudio(); };
     }, []);
 
+    // ── Delete memory ─────────────────────────────────────────────
+    const handleDeleteMemory = (item) => {
+        Alert.alert(
+            'Delete Memory',
+            `Delete this memory?\n"${(item.transcript || '').slice(0, 60)}…"`,
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete', style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            await fetch(`${AI_URL}/api/memories/${item.id}`, { method: 'DELETE' });
+                            setMemories(prev => prev.filter(m => m.id !== item.id));
+                        } catch (e) {
+                            Alert.alert('Error', 'Could not delete memory');
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    // ── Enroll from memory ────────────────────────────────────────
+    const [enrollModal, setEnrollModal] = useState(null);  // { memory_id, suggested }
+    const [enrollName, setEnrollName]   = useState('');
+    const [enrolling, setEnrolling]     = useState(false);
+
+    const openEnrollModal = (item) => {
+        const suggested = (item.speaker && item.speaker !== 'Unknown') ? item.speaker : '';
+        setEnrollName(suggested);
+        setEnrollModal({ memory_id: item.id });
+    };
+
+    const submitEnroll = async () => {
+        if (!enrollName.trim() || !enrollModal) return;
+        setEnrolling(true);
+        try {
+            const res = await fetch(
+                `${AI_URL}/api/enroll-from-memory/${enrollModal.memory_id}?enroll_name=${encodeURIComponent(enrollName.trim())}`,
+                { method: 'POST' }
+            );
+            if (res.ok) {
+                Alert.alert('✅ Enrolled', `Voice profile saved as "${enrollName.trim()}"`);
+                setEnrollModal(null);
+                fetchMemories(true);
+            } else {
+                const err = await res.json().catch(() => ({}));
+                Alert.alert('Error', err.detail || 'Enrollment failed');
+            }
+        } catch (e) {
+            Alert.alert('Error', 'Could not reach server');
+        } finally {
+            setEnrolling(false);
+        }
+    };
+
     // ── Render row ────────────────────────────────────────────────
     const renderItem = ({ item }) => {
         const time = item.timestamp
@@ -224,6 +286,14 @@ export default function VoiceHistory() {
                             color={isPlaying ? '#fff' : COLORS.accent}
                         />
                     </TouchableOpacity>
+
+                    {/* Delete button */}
+                    <TouchableOpacity
+                        onPress={() => handleDeleteMemory(item)}
+                        style={styles.deleteBtn}
+                    >
+                        <Ionicons name="trash-outline" size={13} color={COLORS.danger} />
+                    </TouchableOpacity>
                 </View>
                 <Text style={styles.transcriptText}>{item.transcript || 'No transcript'}</Text>
 
@@ -233,6 +303,19 @@ export default function VoiceHistory() {
                         <View style={styles.playingDot} />
                         <Text style={styles.playingText}>Playing…</Text>
                     </View>
+                )}
+
+                {/* Enroll from this recording */}
+                {item.audio_path && (
+                    <TouchableOpacity
+                        onPress={() => openEnrollModal(item)}
+                        style={styles.enrollFromBtn}
+                    >
+                        <Ionicons name="person-add-outline" size={12} color={COLORS.textMuted} />
+                        <Text style={styles.enrollFromText}>
+                            {speaker === 'Unknown' ? 'Enroll voice' : `Re-enroll as ${speaker}`}
+                        </Text>
+                    </TouchableOpacity>
                 )}
             </View>
         );
@@ -245,6 +328,39 @@ export default function VoiceHistory() {
 
     return (
         <View style={styles.container}>
+
+            {/* ── Enroll-from-memory Modal ──────────────────────── */}
+            <Modal visible={!!enrollModal} transparent animationType="fade" onRequestClose={() => setEnrollModal(null)}>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalBox}>
+                        <Text style={styles.modalTitle}>Enroll Voice</Text>
+                        <Text style={styles.modalSub}>Name this speaker to train recognition</Text>
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="Speaker name…"
+                            placeholderTextColor={COLORS.textMuted}
+                            value={enrollName}
+                            onChangeText={setEnrollName}
+                            autoFocus
+                        />
+                        <View style={styles.modalRow}>
+                            <TouchableOpacity onPress={() => setEnrollModal(null)} style={styles.modalCancel}>
+                                <Text style={styles.modalCancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={submitEnroll}
+                                disabled={!enrollName.trim() || enrolling}
+                                style={[styles.modalConfirm, (!enrollName.trim() || enrolling) && { opacity: 0.5 }]}
+                            >
+                                <Text style={styles.modalConfirmText}>
+                                    {enrolling ? 'Enrolling…' : 'Enroll'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.pillButton}>
@@ -448,6 +564,10 @@ const styles = StyleSheet.create({
         backgroundColor: COLORS.surfaceDeep, justifyContent: 'center', alignItems: 'center',
     },
     playBtnActive: { backgroundColor: COLORS.accent },
+    deleteBtn: {
+        width: 28, height: 28, borderRadius: 9,
+        backgroundColor: 'rgba(255,69,58,0.12)', justifyContent: 'center', alignItems: 'center',
+    },
 
     transcriptText: {
         color: COLORS.textMuted, fontSize: 14, fontFamily: 'Garamond-Regular', lineHeight: 20,
@@ -457,6 +577,40 @@ const styles = StyleSheet.create({
     },
     playingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: COLORS.accent },
     playingText: { color: COLORS.accent, fontSize: 11, fontWeight: '600' },
+
+    enrollFromBtn: {
+        flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8,
+        alignSelf: 'flex-start',
+    },
+    enrollFromText: { color: COLORS.textMuted, fontSize: 11 },
+
+    // Enroll modal
+    modalOverlay: {
+        flex: 1, backgroundColor: 'rgba(0,0,0,0.6)',
+        justifyContent: 'center', alignItems: 'center',
+    },
+    modalBox: {
+        width: '82%', backgroundColor: COLORS.surface, borderRadius: 20,
+        padding: 24,
+    },
+    modalTitle: { color: COLORS.text, fontSize: 18, fontWeight: '700', marginBottom: 4 },
+    modalSub: { color: COLORS.textMuted, fontSize: 13, marginBottom: 16 },
+    modalInput: {
+        backgroundColor: COLORS.bg, borderRadius: 12,
+        paddingHorizontal: 14, paddingVertical: 11,
+        color: COLORS.text, fontSize: 15, marginBottom: 16,
+    },
+    modalRow: { flexDirection: 'row', gap: 10 },
+    modalCancel: {
+        flex: 1, paddingVertical: 12, borderRadius: 12,
+        backgroundColor: COLORS.bg, alignItems: 'center',
+    },
+    modalCancelText: { color: COLORS.textMuted, fontWeight: '600' },
+    modalConfirm: {
+        flex: 1, paddingVertical: 12, borderRadius: 12,
+        backgroundColor: COLORS.accent, alignItems: 'center',
+    },
+    modalConfirmText: { color: '#fff', fontWeight: '700' },
 
     emptyState: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 80 },
     emptyIconWrap: {

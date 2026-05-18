@@ -5,21 +5,31 @@
  *
  *   ESP32 →[UDP local WiFi]→ Phone →[WSS]→ Lightning AI
  *
- * Forwards:
- *   - audio bytes:   UDP in  → WSS send
- *   - commands:      WSS in  → UDP out (back to ESP32)
- *
- * Replaces relay.py on Mac.
+ * Auto-start STREAM:
+ *   ESP32 connects (first UDP packet) + WSS ready → auto-call stream/start
+ *   Seamless, zero-tap recording.
  */
 
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { Platform } from 'react-native';
-import dgram from 'react-native-udp';
-import { NetworkInfo } from 'react-native-network-info';
+import { AI_URL } from '../constants/config';
+
+// react-native-udp requires a native dev build — gracefully degrade if unavailable
+let dgram = null;
+try {
+    dgram = require('react-native-udp');
+} catch (e) {
+    console.warn('[RelayContext] react-native-udp not available (need native build):', e.message);
+}
+
+let NetworkInfo = null;
+try {
+    NetworkInfo = require('react-native-network-info').NetworkInfo;
+} catch (e) {
+    console.warn('[RelayContext] react-native-network-info not available:', e.message);
+}
 
 const RelayContext = createContext();
 
-// Match relay.py
 const UDP_LISTEN_PORT = 5005;   // ESP32 → phone (audio)
 const ESP32_CMD_PORT  = 5006;   // phone → ESP32 (commands)
 const WS_URL          = 'wss://8001-01kkh2et3bdjymj2fjq6jabg8k.cloudspaces.litng.ai/ws/audio';
@@ -29,16 +39,19 @@ export const RelayProvider = ({ children }) => {
     const [phoneIP, setPhoneIP]         = useState('—');
     const [udpReady, setUdpReady]       = useState(false);
     const [wsReady, setWsReady]         = useState(false);
-    const [esp32Addr, setEsp32Addr]     = useState(null);  // {ip, port}
+    const [esp32Addr, setEsp32Addr]     = useState(null);
+    const [streaming, setStreaming]     = useState(false);  // auto-stream state
     const [bytesIn, setBytesIn]         = useState(0);
     const [bytesOut, setBytesOut]       = useState(0);
 
-    const udpSocketRef = useRef(null);
-    const wsRef        = useRef(null);
-    const esp32AddrRef = useRef(null);
+    const udpSocketRef    = useRef(null);
+    const wsRef           = useRef(null);
+    const esp32AddrRef    = useRef(null);
+    const wsReadyRef      = useRef(false);   // sync ref for use inside callbacks
+    const streamingRef    = useRef(false);   // prevent double-start
     const reconnectTimerRef = useRef(null);
 
-    // Throttle byte counter updates so React doesn't choke
+    // ── Throttle byte counter ─────────────────────────────────
     const byteAccumRef = useRef({ in: 0, out: 0, lastFlush: 0 });
     const bumpBytes = (dir, n) => {
         byteAccumRef.current[dir] += n;
@@ -52,7 +65,33 @@ export const RelayProvider = ({ children }) => {
         }
     };
 
-    // ── Get phone's LAN IP so user knows what to put in ESP32 ─
+    // ── Auto-start STREAM when ESP32 + WSS both ready ─────────
+    const autoStartStream = useCallback(async () => {
+        if (streamingRef.current) return;           // already streaming
+        if (!esp32AddrRef.current) return;          // ESP32 not seen yet
+        if (!wsReadyRef.current) return;            // WSS not ready yet
+
+        streamingRef.current = true;
+        setStreaming(true);
+        console.log('[RelayContext] 🎙️ Auto-starting STREAM...');
+
+        try {
+            const res = await fetch(`${AI_URL}/api/bracelet/stream/start`, { method: 'POST' });
+            if (res.ok) {
+                console.log('[RelayContext] ✅ Stream started automatically');
+            } else {
+                console.warn('[RelayContext] ⚠️ Stream start failed:', res.status);
+                streamingRef.current = false;
+                setStreaming(false);
+            }
+        } catch (e) {
+            console.warn('[RelayContext] ⚠️ Stream start error:', e.message);
+            streamingRef.current = false;
+            setStreaming(false);
+        }
+    }, []);
+
+    // ── Get phone LAN IP ──────────────────────────────────────
     useEffect(() => {
         NetworkInfo.getIPV4Address().then(ip => {
             if (ip) setPhoneIP(ip);
@@ -70,19 +109,21 @@ export const RelayProvider = ({ children }) => {
         });
 
         sock.on('message', (data, rinfo) => {
-            // Remember ESP32 address for command return path
+            // First packet from ESP32 → save address + trigger auto-start
             const newAddr = { ip: rinfo.address, port: ESP32_CMD_PORT };
-            if (!esp32AddrRef.current || esp32AddrRef.current.ip !== newAddr.ip) {
+            const isNewDevice = !esp32AddrRef.current || esp32AddrRef.current.ip !== newAddr.ip;
+            if (isNewDevice) {
                 esp32AddrRef.current = newAddr;
                 setEsp32Addr(newAddr);
-                console.log(`[RelayContext] ESP32 first seen: ${newAddr.ip}`);
+                console.log(`[RelayContext] 📡 ESP32 connected: ${newAddr.ip}`);
+                streamingRef.current = false;  // reset so new device triggers stream
+                autoStartStream();
             }
 
-            // Try as text first (HELLO, STOP, etc.)
+            // Try as text (HELLO, STOP, etc.)
             let asText = null;
             try {
                 asText = data.toString('utf8').trim();
-                // Heuristic: if all chars are printable, treat as text
                 if (!/^[\x20-\x7E\r\n]+$/.test(asText)) asText = null;
             } catch { asText = null; }
 
@@ -106,7 +147,7 @@ export const RelayProvider = ({ children }) => {
             udpSocketRef.current = null;
             setUdpReady(false);
         };
-    }, []);
+    }, [autoStartStream]);
 
     // ── WebSocket: connect to Lightning AI ────────────────────
     const connectWS = useCallback(() => {
@@ -119,12 +160,14 @@ export const RelayProvider = ({ children }) => {
 
         ws.onopen = () => {
             console.log('[RelayContext] WS connected');
+            wsReadyRef.current = true;
             setWsReady(true);
             ws.send('HELLO');
+            // If ESP32 already connected before WS came up → start now
+            autoStartStream();
         };
 
         ws.onmessage = (evt) => {
-            // Server → ESP32 (commands)
             const sock = udpSocketRef.current;
             const addr = esp32AddrRef.current;
             if (!sock || !addr) return;
@@ -136,12 +179,10 @@ export const RelayProvider = ({ children }) => {
             sock.send(
                 payload,
                 0,
-                typeof payload === 'string' ? payload.length : payload.length,
+                payload.length,
                 addr.port,
                 addr.ip,
-                (err) => {
-                    if (err) console.warn('[RelayContext] UDP send err', err);
-                }
+                (err) => { if (err) console.warn('[RelayContext] UDP send err', err); }
             );
         };
 
@@ -151,12 +192,15 @@ export const RelayProvider = ({ children }) => {
 
         ws.onclose = () => {
             console.log('[RelayContext] WS closed — reconnecting in', RECONNECT_MS, 'ms');
+            wsReadyRef.current = false;
+            streamingRef.current = false;  // will re-trigger stream on reconnect
             setWsReady(false);
+            setStreaming(false);
             wsRef.current = null;
             if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = setTimeout(connectWS, RECONNECT_MS);
         };
-    }, []);
+    }, [autoStartStream]);
 
     useEffect(() => {
         connectWS();
@@ -173,6 +217,7 @@ export const RelayProvider = ({ children }) => {
             udpReady,
             wsReady,
             esp32Addr,
+            streaming,
             bytesIn,
             bytesOut,
         }}>

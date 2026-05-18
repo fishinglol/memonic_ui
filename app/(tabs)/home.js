@@ -67,7 +67,8 @@ export default function Home() {
     const fetchSummary = useCallback(async (forceRefresh = false) => {
         setSummaryLoading(true);
         try {
-            const url = `${AI_URL}/api/today-summary/fish${forceRefresh ? '?refresh=true' : ''}`;
+            const userId = (await AsyncStorage.getItem('user_id')) || 'default';
+            const url = `${AI_URL}/api/today-summary/${userId}${forceRefresh ? '?refresh=true' : ''}`;
             const res = await fetch(url);
             const data = await res.json();
             setSummary(data.summary || 'Start talking to Memonic to see your daily recap.');

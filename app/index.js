@@ -34,7 +34,8 @@ export default function Index() {
       if (response.ok) {
         await AsyncStorage.setItem('user_name', userName);
         if (data?.user_id) await AsyncStorage.setItem('user_id', String(data.user_id));
-        router.push('/chat');
+        const hasPin = await AsyncStorage.getItem('app_pin');
+        router.replace(hasPin ? '/pin' : '/setup-pin');
       } else {
         Alert.alert('Login Failed', data?.detail || 'Invalid credentials');
       }

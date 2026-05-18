@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { COLORS, SHADOWS } from '../constants/theme';
 import { API_URL } from '../constants/config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function SignIn() {
   const [userName, setUserName] = useState('');
@@ -35,8 +36,10 @@ export default function SignIn() {
         Alert.alert("Server Error", "Received an invalid response."); return;
       }
       if (response.ok) {
-        Alert.alert('Account Created! 🎉', `Welcome, ${data.user_name}!`,
-          [{ text: 'Go to Login', onPress: () => router.replace('/') }]);
+        // Auto-login after register → set PIN
+        await AsyncStorage.setItem('user_name', data.user_name || userName);
+        if (data?.id) await AsyncStorage.setItem('user_id', String(data.id));
+        router.replace('/setup-pin');
       } else {
         Alert.alert('Sign Up Failed', data?.detail || 'Something went wrong.');
       }
